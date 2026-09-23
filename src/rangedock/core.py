@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -45,6 +46,14 @@ def valid_name(name: str) -> str:
 
 def container_name(name: str) -> str:
     return f"rangedock-{valid_name(name)}"
+
+
+def host_user_options() -> list[str]:
+    # A Linux/macOS bind mount keeps host ownership. Match that identity so
+    # files created inside /workspace belong to the person running the CLI.
+    if hasattr(os, "getuid") and hasattr(os, "getgid"):
+        return ["--user", f"{os.getuid()}:{os.getgid()}", "--env", "HOME=/workspace"]
+    return []
 
 
 class Workbench:
@@ -102,7 +111,7 @@ class Workbench:
             "--label", f"{WORKSPACE_LABEL}={folder}",
             "--init", "--security-opt", "no-new-privileges",
             "--mount", f"type=bind,source={folder},target=/workspace",
-            "--workdir", "/workspace", IMAGE,
+            "--workdir", "/workspace", *host_user_options(), IMAGE,
         ])
         return folder
 

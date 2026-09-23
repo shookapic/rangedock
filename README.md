@@ -15,6 +15,7 @@ rangedock stop lab ──────────────> container stops; 
 ```
 
 The bundled image includes a compact set of general lab tools: `nmap`, `curl`, `dig`, `whois`, `netcat`, `git`, `jq`, Python, `ripgrep`, and `tmux`. It runs as an unprivileged user. Containers are created without privileged mode or host networking.
+On Linux and macOS, RangeDock uses your host user ID inside the container so files written to the mounted workspace stay yours.
 
 ## Install
 

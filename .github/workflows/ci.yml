@@ -22,5 +22,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: docker build -t rangedock:test src/rangedock
-      - run: docker run --rm --entrypoint nmap rangedock:test --version
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -e .
+      - run: rangedock build
+      - run: rangedock create smoke --workspace "$RUNNER_TEMP/rangedock-smoke"
+      - run: rangedock run smoke -- nmap --version
+      - run: rangedock run smoke -- sh -c 'echo persisted > /workspace/proof.txt'
+      - run: test "$(cat "$RUNNER_TEMP/rangedock-smoke/proof.txt")" = persisted
+      - run: rangedock stop smoke
+      - run: rangedock remove smoke
+      - run: test -f "$RUNNER_TEMP/rangedock-smoke/proof.txt"
