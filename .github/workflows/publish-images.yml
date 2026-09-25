@@ -5,9 +5,11 @@ on:
       - 'v*'
 permissions:
   contents: read
-  packages: write
 jobs:
   publish:
+    permissions:
+      contents: read
+      packages: write
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
