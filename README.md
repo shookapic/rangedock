@@ -46,12 +46,12 @@ You can use `uv tool install git+https://github.com/shookapic/rangedock.git` or 
 
 If you do not have pipx or uv, see their [pipx installation](https://pipx.pypa.io/latest/how-to/install-pipx.html) or [uv installation](https://docs.astral.sh/uv/getting-started/installation/) instructions. If `rangedock` is not found after installation, open a new terminal and check that your tool install directory is on `PATH`.
 
-Upgrading from v0.2.x: existing containers remain usable on their original image. New workspaces use v0.3 images. To move an existing workspace to the new image, note its folder with `rangedock info NAME`, then run `rangedock stop NAME`, `rangedock remove NAME`, and `rangedock open NAME --workspace PATH`. Files in the mounted host folder remain; changes stored only inside the old container do not. `rangedock image update web` refreshes the local image tag but never changes existing containers.
+Upgrading from an earlier version: existing containers remain usable on their original image. New workspaces use v0.4 images, which add the tool manifest that powers console completion. To move an existing workspace to the new image, note its folder with `rangedock info NAME`, then run `rangedock stop NAME`, `rangedock remove NAME`, and `rangedock open NAME --workspace PATH`. Files in the mounted host folder remain; changes stored only inside the old container do not. `rangedock image update web` refreshes the local image tag but never changes existing containers.
 
 ## First workspace
 
 Run `rangedock tour` for a read-only command walkthrough. Run `rangedock tour --run` to try it with a small `base` workspace. The hands-on tour creates `~/rangedock-workspaces/tour/rangedock-tour.txt`, demonstrates that the file survives a container restart, and leaves the practice container stopped. `rangedock remove tour` removes that container while keeping the host files. Use `--name` or `--workspace` to choose another practice location. The base image may download on first use.
-The v0.3.1 CLI uses the tested v0.3.0 images; tutorial changes do not require downloading new images.
+The v0.4.0 CLI uses the v0.4.0 images, which carry the tool manifest for console completion.
 
 ```bash
 rangedock open lab
@@ -90,7 +90,7 @@ rangedock vpn logs vpn-lab
 rangedock vpn disconnect vpn-lab
 ```
 
-RangeDock mounts the config directory read-only at `/vpn`, so put referenced credential and certificate files in that directory and use relative paths in the config. VPN workspaces receive only `NET_ADMIN` and `/dev/net/tun`; other workspaces do not. OpenVPN reconnects when a configured workspace is restarted through RangeDock. `vpn status` reports whether the process is running; inspect `vpn logs` to confirm tunnel negotiation. Device support depends on the Docker host. WireGuard is not yet supported.
+RangeDock mounts the config directory read-only at `/vpn`, so put referenced credential and certificate files in that directory and use relative paths in the config. VPN workspaces receive only `NET_ADMIN` and `/dev/net/tun`; other workspaces do not. OpenVPN reconnects when a configured workspace is restarted through RangeDock. `vpn status` reports `OpenVPN connected` once the tunnel is up (OpenVPN logged its initialization), `OpenVPN running, tunnel not up yet` while it is still negotiating, or `OpenVPN stopped`; `vpn connect` waits briefly for the tunnel before returning. Inspect `vpn logs` to see negotiation detail. Device support depends on the Docker host. WireGuard is not yet supported.
 
 ### Saved VPN profiles
 
@@ -115,20 +115,28 @@ rangedock console htb-box --profile htb
 rangedock console --last
 ```
 
-The console is a prompt for one existing workspace. It starts the workspace if needed but never creates one. Commands run inside the workspace with its usual user, mounts, and capabilities, and each shows its exit code and duration. `Tab` completes installed tools and their common options, workspace names, VPN profiles, and `rangedock` subcommands. `Ctrl-K` opens a command palette (workspace info, VPN status, desktop, image list, and more), `Ctrl-R` searches history, `Ctrl-C` stops the running command, and `Ctrl-D` leaves the console while the workspace keeps running.
+The console is a prompt for one existing workspace. It starts the workspace if needed but never creates one. Commands run inside the workspace with its usual user, mounts, and capabilities, and each shows its exit code and duration. `Tab` completes installed tools and their common options, workspace names, VPN profiles, and `rangedock` subcommands. `Ctrl-K` opens a command palette (workspace info, VPN status, desktop, image list, and more), `Ctrl-R` searches history, `Ctrl-C` stops the running command, and `Ctrl-D` leaves the console while the workspace keeps running. The header shows the workspace image and whether its VPN is `connected`, `connecting`, or `stopped`.
 
-Inside the console, `cd PATH` sets the directory for later commands, `help` lists console commands, `help TOOL` shows a tool's `--help` and adds its options to completion, and `rangedock ...` runs RangeDock commands. Commands without shell syntax run as an argument vector; pipes, redirects, and variables go to the workspace's Bash. Nothing is sent to a network service.
+Inside the console, `cd PATH` sets the directory for later commands, `tool NAME` prints a tool's options from the manifest without running anything, `help TOOL` runs a tool's `--help` and adds its options to completion, `help` lists console commands, and `rangedock ...` runs RangeDock commands. Commands without shell syntax run as an argument vector; pipes, redirects, and variables go to the workspace's Bash. Nothing is sent to a network service.
 
-History is stored per workspace in the RangeDock config directory, on the host. End a command with `# no-save` to keep it out of the history file, or turn history off in `config.toml` next to `profiles.toml`:
+History is stored per workspace in the RangeDock config directory, on the host. End a command with `# no-save` to keep it out of the history file.
 
-```toml
-[console]
-history = false
+### Preferences
+
+`rangedock config` stores preferences in `config.toml` next to `profiles.toml`:
+
+```bash
+rangedock config list
+rangedock config set console.editing vi
+rangedock config set console.history false
+rangedock config reset console.editing
 ```
 
-Use `rangedock console NAME --plain` for a simple line prompt without menus or colors; it is also used automatically when input is not a terminal. `NO_COLOR` disables colors in the full console. `rangedock enter NAME` remains the plain Bash shell.
+The settings are `console.history`, `console.plain` (always use the simple prompt), `console.color`, `console.editing` (`emacs` or `vi`), and `desktop.open_browser`. `rangedock console NAME --plain` forces the simple line prompt for one session without menus, colors, or non-ASCII symbols; it is also used automatically when input is not a terminal. `NO_COLOR` disables colors in the full console. `rangedock enter NAME` remains the plain Bash shell.
 
-Completion reads the tool manifest at `/usr/share/rangedock/tools.json`, generated while each image is built. `rangedock tools NAME` shows it. Images built before the manifest existed fall back to the catalog bundled with the CLI, limited to commands found in the workspace.
+Completion reads the tool manifest at `/usr/share/rangedock/tools.json`, generated while each image is built. `rangedock tools NAME` lists it and `rangedock tools NAME --tool NMAP` shows one tool's options. Images built before the manifest existed fall back to the catalog bundled with the CLI, limited to commands found in the workspace.
+
+`rangedock bench NAME` times repeated re-entry into a running workspace on your own host and reports the median and p95; it is a local check, not a published benchmark.
 
 Other commands:
 
@@ -145,9 +153,9 @@ rangedock remove lab
 
 `create` and `enter` remain available separately. `run` starts a stopped workspace automatically. `remove` only deletes a stopped RangeDock container. It does **not** delete the workspace folder or its files.
 
-## Scope of version 0.3
+## Scope of version 0.4
 
-This release manages local named workspaces, versioned images, an opt-in browser desktop, and OpenVPN process control. It does not provide WireGuard, a VPN server, or host-wide VPN routing. It does not scan any target on its own. Use network tools only on systems you own or have permission to assess.
+This release manages local named workspaces, versioned images, saved VPN profiles, an interactive lab console with local completion, an opt-in browser desktop, and OpenVPN process control. It does not provide WireGuard, a VPN server, or host-wide VPN routing. It does not scan any target on its own. Use network tools only on systems you own or have permission to assess.
 
 The Docker daemon has broad access to its host. RangeDock checks its management label before stopping or removing a container, but that label is an ownership guard, not a security boundary. Inspect the Dockerfile before building and mount only folders you intend to share.
 

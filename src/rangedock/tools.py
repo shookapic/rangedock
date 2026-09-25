@@ -90,6 +90,19 @@ def workspace_tools(bench: Workbench, name: str) -> ToolCatalog:
     return ToolCatalog(parse_tools(text, MANIFEST_PATH), f"image manifest {MANIFEST_PATH}")
 
 
+def describe_tool(tool: Tool) -> list[str]:
+    """Readable help built from the manifest alone; nothing runs in the workspace."""
+    lines = [f"{tool.name} - {tool.description} ({tool.category})"]
+    if tool.aliases:
+        lines.append(f"Also available as: {', '.join(tool.aliases)}")
+    if tool.options:
+        width = max(len(option.flag) for option in tool.options)
+        lines.append("Common options:")
+        lines += [f"  {option.flag:<{width}}  {option.description}" for option in tool.options]
+    lines.append(f"Full help: help {tool.name} (runs '{tool.name} --help' inside the workspace)")
+    return lines
+
+
 def options_from_help(text: str) -> list[str]:
     """Extract option flags from a tool's --help output."""
     return sorted(set(HELP_OPTION_RE.findall(text)))

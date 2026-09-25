@@ -9,7 +9,7 @@ from unittest import mock
 
 from rangedock.cli import build_parser
 from rangedock.completion import CompletionEngine, CompletionSources, command_tree
-from rangedock.console import ConsoleSession, ConsoleSettings, is_private, last_workspace, parse_line
+from rangedock.console import ConsoleSession, is_private, last_workspace, parse_line
 from rangedock.core import RangeDockError, Workbench
 from rangedock.profiles import ProfileStore
 from rangedock.terminal import ConsoleHistory
@@ -208,16 +208,6 @@ class ToolManifestTests(unittest.TestCase):
 
 
 class ConsoleStorageTests(unittest.TestCase):
-    def test_history_can_be_disabled(self):
-        with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "config.toml"
-            self.assertTrue(ConsoleSettings.load(path).history)
-            path.write_text("[console]\nhistory = false\n", encoding="utf-8")
-            self.assertFalse(ConsoleSettings.load(path).history)
-            path.write_text("[console]\nhistory = 'no'\n", encoding="utf-8")
-            with self.assertRaisesRegex(RangeDockError, "true or false"):
-                ConsoleSettings.load(path)
-
     def test_history_file_skips_no_save_lines(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "history"

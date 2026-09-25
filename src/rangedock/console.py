@@ -17,10 +17,11 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from .completion import CommandNode, CompletionEngine, CompletionSources, PaletteAction
-from .config import config_dir, read_toml, write_private_text
+from .config import config_dir, write_private_text
 from .core import RangeDockError, Workbench, valid_name
+from .preferences import Preferences
 from .profiles import ProfileStore
-from .tools import options_from_help, workspace_tools
+from .tools import describe_tool, options_from_help, workspace_tools
 
 NO_SAVE = "# no-save"
 SHELL_CHARS = frozenset("|&;<>()$`*?[]{}~!#")
@@ -48,19 +49,6 @@ class ConsoleCommand:
     text: str
     words: list[str]
     shell: bool
-
-
-@dataclass(frozen=True)
-class ConsoleSettings:
-    history: bool = True
-
-    @classmethod
-    def load(cls, path: Path) -> ConsoleSettings:
-        section = read_toml(path).get("console", {})
-        history = section.get("history", True) if isinstance(section, dict) else True
-        if not isinstance(history, bool):
-            raise RangeDockError(f"Invalid setting in {path}: console.history must be true or false.")
-        return cls(history=history)
 
 
 def is_private(line: str) -> bool:
@@ -113,12 +101,12 @@ def last_workspace() -> str:
 
 class ConsoleSession:
     def __init__(self, bench: Workbench, name: str, *, tree: CommandNode, dispatch: Dispatch,
-                 profiles: ProfileStore | None = None, settings: ConsoleSettings | None = None):
+                 profiles: ProfileStore | None = None, preferences: Preferences | None = None):
         self.bench = bench
         self.name = valid_name(name)
         self.dispatch = dispatch
         self.profiles = profiles or ProfileStore()
-        self.settings = settings or ConsoleSettings()
+        self.preferences = preferences or Preferences()
         self.sources = CompletionSources()
         self.engine = CompletionEngine(tree, self.sources)
         self.cwd = DEFAULT_CWD
@@ -133,7 +121,7 @@ class ConsoleSession:
         parts = ["RangeDock", self.name, details["profile"], details["status"]]
         if details["vpn"] != "none":
             label = "VPN" if details["vpn_profile"] == "none" else f"VPN {details['vpn_profile']}"
-            parts.append(f"{label} {'running' if self.bench.vpn_active(self.name) else 'stopped'}")
+            parts.append(f"{label} {self.bench.vpn_state(self.name).replace('workspace ', '')}")
         self.header = " · ".join(parts)
         self.sources.workspaces = sorted(row.get("Names", "").removeprefix("rangedock-")
                                          for row in self.bench.list())
@@ -160,6 +148,10 @@ class ConsoleSession:
             self.change_directory(command)
         elif name == "help":
             self.show_help(command.words[1:])
+        elif name == "tool":
+            if len(command.words) != 2:
+                raise RangeDockError("Usage: tool NAME")
+            self.show_tool_summary(command.words[1])
         elif name == "rangedock":
             self.run_rangedock(command)
         else:
@@ -202,7 +194,8 @@ class ConsoleSession:
             return
         print("Commands run inside the workspace. Console commands:")
         print("  cd PATH           change the working directory for later commands")
-        print("  help TOOL         show a tool's --help and learn its options for completion")
+        print("  tool TOOL         show a tool's options from the manifest, without running it")
+        print("  help TOOL         run a tool's --help and learn its options for completion")
         print("  rangedock ...     run a RangeDock command, e.g. 'rangedock vpn status'")
         print("  exit              leave the console; the workspace keeps running")
         print(f"End a command with '{NO_SAVE}' to keep it out of history.")
@@ -210,6 +203,15 @@ class ConsoleSession:
         print("Palette:")
         for action in self.palette():
             print(f"  {action.title:<16} {action.command}")
+
+    def show_tool_summary(self, command: str) -> None:
+        tool = self.sources.tools.find(command)
+        if tool is None:
+            raise RangeDockError(
+                f"'{command}' is not in this image's tool manifest. "
+                f"Run 'help {command}' for its own --help, or 'rangedock tools {self.name}' to list tools."
+            )
+        print("\n".join(describe_tool(tool)))
 
     def show_tool_help(self, command: str) -> None:
         tool = self.sources.tools.find(command)
@@ -249,8 +251,8 @@ class ConsoleSession:
 
 
 def open_console(bench: Workbench, name: str, *, tree: CommandNode, dispatch: Dispatch,
-                 plain: bool = False) -> None:
-    settings = ConsoleSettings.load(config_dir() / "config.toml")
+                 plain: bool = False, preferences: Preferences | None = None) -> None:
+    preferences = preferences or Preferences()
     interactive = sys.stdin.isatty() and sys.stdout.isatty()
-    session = ConsoleSession(bench, name, tree=tree, dispatch=dispatch, settings=settings)
-    session.run(plain=plain or not interactive)
+    session = ConsoleSession(bench, name, tree=tree, dispatch=dispatch, preferences=preferences)
+    session.run(plain=plain or preferences.get("console.plain") or not interactive)

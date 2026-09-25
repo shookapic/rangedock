@@ -10,8 +10,9 @@ from pathlib import Path
 from .completion import command_tree
 from .console import last_workspace, open_console
 from .core import IMAGES, PROFILES, RangeDockError, Workbench
+from .preferences import SETTINGS, Preferences, format_value
 from .profiles import VPN_TYPES, ProfileStore
-from .tools import workspace_tools
+from .tools import describe_tool, workspace_tools
 from .tour import run_tour, show_tour
 
 
@@ -59,6 +60,46 @@ def show_profile(store: ProfileStore, name: str) -> None:
     print(f"{'Status':<11} {'ready' if profile.available else 'missing'}")
     if not profile.available:
         print(f"rangedock: warning: config file is missing: {profile.config}", file=sys.stderr)
+
+
+def show_settings(preferences: Preferences) -> None:
+    values = preferences.values()
+    width = max(len(key) for key in SETTINGS)
+    for key, setting in SETTINGS.items():
+        print(f"{key:<{width}}  {format_value(values[key]):<7}  {setting.help}")
+
+
+def show_tools(bench: Workbench, name: str, tool_name: str | None) -> None:
+    catalog = workspace_tools(bench, name)
+    if tool_name is not None:
+        tool = catalog.find(tool_name)
+        if tool is None:
+            raise RangeDockError(f"'{tool_name}' is not in the tool manifest for '{name}'.")
+        print("\n".join(describe_tool(tool)))
+        return
+    print(f"Source: {catalog.source}")
+    for tool in sorted(catalog.tools, key=lambda item: (item.category, item.name)):
+        print(f"{tool.name:<14} {tool.category:<12} {tool.description}")
+
+
+def run_benchmark(bench: Workbench, name: str, runs: int) -> None:
+    """Time repeated re-entry into a running workspace and report median and p95."""
+    import statistics
+    import time
+
+    bench.start(name)
+    details = bench.info(name)
+    samples = []
+    for _ in range(runs):
+        started = time.monotonic()
+        bench.capture(name, ["true"])
+        samples.append((time.monotonic() - started) * 1000)
+    samples.sort()
+    p95 = samples[min(len(samples) - 1, int(round(0.95 * (len(samples) - 1))))]
+    print(f"Workspace {name} ({details['profile']}, image {details['image_id'][:19]})")
+    print(f"Re-enter (exec) over {runs} runs: "
+          f"median {statistics.median(samples):.0f} ms, p95 {p95:.0f} ms, min {samples[0]:.0f} ms")
+    print("Measured inside this host with the workspace already running; not a published benchmark.")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -139,13 +180,32 @@ def build_parser() -> argparse.ArgumentParser:
     console.add_argument("--plain", action="store_true", help="simple line prompt without menus or colors")
     tools = sub.add_parser("tools", help="list the tools a workspace image provides")
     tools.add_argument("name")
+    tools.add_argument("--tool", metavar="NAME", help="show one tool's options instead of the full list")
+    bench_command = sub.add_parser("bench", help="time re-entry into a workspace on this host")
+    bench_command.add_argument("name")
+    bench_command.add_argument("--runs", type=int, default=20, help="number of samples (default: 20)")
+    config = sub.add_parser("config", help="show or change persisted preferences")
+    config_sub = config.add_subparsers(dest="config_action", required=True)
+    config_sub.add_parser("list", help="show all settings and their values")
+    config_get = config_sub.add_parser("get", help="show one setting")
+    config_get.add_argument("key", choices=list(SETTINGS))
+    config_set = config_sub.add_parser("set", help="change one setting")
+    config_set.add_argument("key", choices=list(SETTINGS))
+    config_set.add_argument("value")
+    config_reset = config_sub.add_parser("reset", help="restore one setting to its default")
+    config_reset.add_argument("key", choices=list(SETTINGS))
     return parser
+
+
+def open_browser(no_browser: bool, preferences: Preferences) -> bool:
+    return not no_browser and preferences.get("desktop.open_browser")
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     bench = Workbench()
     store = ProfileStore()
+    preferences = Preferences()
     try:
         if args.action == "tour":
             if args.run:
@@ -206,12 +266,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.action == "desktop":
             url = bench.desktop_url(args.name)
             print(f"Desktop: {url}")
-            if not args.no_browser:
+            if open_browser(args.no_browser, preferences):
                 webbrowser.open(url)
         elif args.action == "burp":
             url = bench.burp(args.name)
             print(f"Burp desktop: {url}")
-            if not args.no_browser:
+            if open_browser(args.no_browser, preferences):
                 webbrowser.open(url)
         elif args.action == "vpn":
             if args.vpn_action == "profile":
@@ -241,12 +301,21 @@ def main(argv: list[str] | None = None) -> int:
             if args.vpn_profile:
                 require_profile(bench, store, name, args.vpn_profile)
                 print(bench.vpn_connect(name))
-            open_console(bench, name, tree=command_tree(build_parser()), dispatch=main, plain=args.plain)
+            open_console(bench, name, tree=command_tree(build_parser()), dispatch=main,
+                         plain=args.plain, preferences=preferences)
         elif args.action == "tools":
-            catalog = workspace_tools(bench, args.name)
-            print(f"Source: {catalog.source}")
-            for tool in sorted(catalog.tools, key=lambda item: (item.category, item.name)):
-                print(f"{tool.name:<14} {tool.category:<12} {tool.description}")
+            show_tools(bench, args.name, args.tool)
+        elif args.action == "bench":
+            run_benchmark(bench, args.name, args.runs)
+        elif args.action == "config":
+            if args.config_action == "list":
+                show_settings(preferences)
+            elif args.config_action == "get":
+                print(format_value(preferences.get(args.key)))
+            elif args.config_action == "set":
+                print(f"{args.key} = {format_value(preferences.set(args.key, args.value))}")
+            elif args.config_action == "reset":
+                print(f"{args.key} = {format_value(preferences.reset(args.key))} (default)")
         elif args.action == "stop":
             print(f"{'Stopped' if bench.stop(args.name) else 'Already stopped'} {args.name}")
         elif args.action == "remove":

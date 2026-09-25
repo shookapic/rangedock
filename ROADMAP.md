@@ -16,21 +16,22 @@ and more. RangeDock should reach comparable **daily workflow quality** before cl
 anything like catalog or feature parity. Copying hundreds of tools into one image would
 make the first release slower and harder to maintain.
 
-## Where we are: v0.3.0
+## Where we are: v0.4.0
 
-Shipped: named workspaces and persistent host folders; CLI lifecycle commands;
-non-root images; Linux host UID/GID mapping; Docker ownership labels; local image
-builds; published base, web, and desktop images; an opt-in localhost browser desktop;
-user-installed Burp; and opt-in OpenVPN with scoped device/capability access. The base
-image measured about 566 MB and the web image about 4.26 GB locally on the maintainer's
-Docker Desktop. These are local measurements, not compressed download sizes.
+Shipped through v0.3: named workspaces and persistent host folders; CLI lifecycle
+commands; non-root images; Linux host UID/GID mapping; Docker ownership labels; local
+image builds; published base, web, and desktop images; an opt-in localhost browser
+desktop; user-installed Burp; and opt-in OpenVPN with scoped device/capability access.
+The base image measured about 566 MB and the web image about 4.26 GB locally on the
+maintainer's Docker Desktop. These are local measurements, not compressed download sizes.
 
-Since then: saved VPN profiles, an interactive lab console with local completion and
-history, and a per-image tool manifest (see [SPEC.md](SPEC.md)).
+New in v0.4: saved VPN profiles, connection-aware VPN status, an interactive lab console
+with local completion, history, a command palette, and persisted preferences, plus a
+per-image tool manifest and a local re-entry benchmark (see [SPEC.md](SPEC.md)).
 
-Missing for broader use: WireGuard, saved workspace profiles, persistent desktop settings
-across container recreation, image vulnerability gates, VPN DNS verification, and a
-supported-platform benchmark matrix.
+Missing for broader use: WireGuard, persistent desktop settings across container
+recreation, image vulnerability gates, VPN DNS verification, and a supported-platform
+benchmark matrix.
 
 ## Release sequence
 

@@ -7,8 +7,10 @@ from typing import Callable, Iterable
 from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import CompleteEvent, Completer, Completion
 from prompt_toolkit.document import Document
+from prompt_toolkit.enums import EditingMode
 from prompt_toolkit.history import FileHistory, History, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
+from prompt_toolkit.output.color_depth import ColorDepth
 
 from .config import create_private_file
 from .console import KEY_HINTS, ConsoleSession, history_path, is_private
@@ -43,7 +45,7 @@ class ConsoleHistory(FileHistory):
 
 
 def console_history(session: ConsoleSession) -> History:
-    if not session.settings.history:
+    if not session.preferences.get("console.history"):
         return InMemoryHistory()
     path = history_path(session.name)
     create_private_file(path)
@@ -60,9 +62,12 @@ def prompt_reader(session: ConsoleSession) -> Callable[[], str]:
         event.app.current_buffer.text = ""
         event.app.current_buffer.start_completion(select_first=False)
 
+    editing = EditingMode.VI if session.preferences.get("console.editing") == "vi" else EditingMode.EMACS
+    color_depth = None if session.preferences.get("console.color") else ColorDepth.DEPTH_1_BIT
     prompt = PromptSession(
         history=console_history(session), completer=completer, complete_while_typing=False,
-        key_bindings=bindings, bottom_toolbar=lambda: f" {session.header} │ {KEY_HINTS}",
+        key_bindings=bindings, editing_mode=editing, color_depth=color_depth,
+        bottom_toolbar=lambda: f" {session.header} │ {KEY_HINTS}",
     )
 
     def read() -> str:

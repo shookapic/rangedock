@@ -11,7 +11,7 @@ import time
 from importlib import resources
 from pathlib import Path
 
-IMAGE_VERSION = "0.3.0"
+IMAGE_VERSION = "0.4.0"
 PROFILES = ("base", "web", "desktop")
 IMAGES = {profile: f"rangedock:{IMAGE_VERSION}-{profile}" for profile in PROFILES}
 REMOTE_IMAGES = {profile: f"ghcr.io/shookapic/rangedock:v{IMAGE_VERSION}-{profile}" for profile in PROFILES}
@@ -25,8 +25,17 @@ VPN_SUFFIXES = (".ovpn", ".conf")
 VPN_PID = "/run/rangedock-openvpn.pid"
 VPN_LOG = "/run/rangedock-openvpn.log"
 VPN_DISABLED = "/run/rangedock-vpn-disabled"
+# OpenVPN logs this once the tunnel is up, and "process restarting" when it drops and retries.
+VPN_CONNECTED = "Initialization Sequence Completed"
+VPN_RESTARTING = "process restarting"
+VPN_CONNECT_TIMEOUT = 15.0
+VPN_MESSAGES = {
+    "workspace stopped": "workspace stopped",
+    "stopped": "OpenVPN stopped",
+    "connecting": "OpenVPN running, tunnel not up yet",
+    "connected": "OpenVPN connected",
+}
 NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
-NO_VPN = "Workspace '{name}' has no VPN config. Create one with --vpn FILE or --vpn-profile NAME."
 
 
 class RangeDockError(Exception):
@@ -234,6 +243,7 @@ class Workbench:
             "name": name,
             "status": state.get("Status") or ("running" if state.get("Running") else "stopped"),
             "image": details.get("Config", {}).get("Image", "unknown"),
+            "image_id": details.get("Image", "unknown"),
             "profile": labels.get(PROFILE_LABEL, "legacy"),
             "workspace": labels.get(WORKSPACE_LABEL, "unknown"),
             "vpn": labels.get(VPN_LABEL, "none"),
@@ -303,21 +313,34 @@ class Workbench:
         self._start_vpn(container, details)
         return "Started"
 
-    def vpn_status(self, name: str) -> str:
+    def _vpn_workspace(self, name: str) -> tuple[str, dict]:
         container, details = self._managed(name)
-        labels = details.get("Config", {}).get("Labels") or {}
-        if not labels.get(VPN_LABEL):
-            raise RangeDockError(NO_VPN.format(name=name))
-        if not details.get("State", {}).get("Running"):
-            state = "workspace stopped"
-        else:
-            state = "OpenVPN process running" if self._vpn_running(container) else "OpenVPN process stopped"
-        profile = labels.get(VPN_PROFILE_LABEL)
-        return f"{state} (profile {profile})" if profile else state
+        if not (details.get("Config", {}).get("Labels") or {}).get(VPN_LABEL):
+            raise RangeDockError(
+                f"Workspace '{name}' has no VPN config. Create one with --vpn FILE or --vpn-profile NAME."
+            )
+        return container, details
 
-    def vpn_active(self, name: str) -> bool:
-        container, details = self._managed(name)
-        return bool(details.get("State", {}).get("Running")) and self._vpn_running(container)
+    def vpn_state(self, name: str) -> str:
+        """Return 'workspace stopped', 'stopped', 'connecting', or 'connected'."""
+        container, details = self._vpn_workspace(name)
+        if not details.get("State", {}).get("Running"):
+            return "workspace stopped"
+        if not self._vpn_running(container):
+            return "stopped"
+        try:
+            last_event = self.docker.call([
+                "container", "exec", "--user", "root", container, "sh", "-c", 'grep -E "$1" "$2" | tail -n 1',
+                "sh", f"{VPN_CONNECTED}|{VPN_RESTARTING}", VPN_LOG,
+            ])
+        except RangeDockError:
+            return "connecting"
+        return "connected" if VPN_CONNECTED in last_event else "connecting"
+
+    def vpn_status(self, name: str) -> str:
+        message = VPN_MESSAGES[self.vpn_state(name)]
+        profile = self.info(name)["vpn_profile"]
+        return message if profile == "none" else f"{message} (profile {profile})"
 
     def check_vpn_profile(self, name: str, profile: str, config: Path) -> None:
         """Refuse to treat a workspace as using a profile whose config it does not mount."""
@@ -329,21 +352,21 @@ class Workbench:
             )
 
     def vpn_connect(self, name: str) -> str:
-        container, details = self._managed(name)
-        if not (details.get("Config", {}).get("Labels") or {}).get(VPN_LABEL):
-            raise RangeDockError(NO_VPN.format(name=name))
+        """Start OpenVPN and wait briefly for the tunnel to come up."""
+        container, details = self._vpn_workspace(name)
         if not details.get("State", {}).get("Running"):
             self.docker.call(["container", "start", container])
             self._reset_vpn(container, details)
         else:
             self.docker.call(["container", "exec", "--user", "root", container, "rm", "-f", VPN_DISABLED])
         self._start_vpn(container, details)
+        deadline = time.monotonic() + VPN_CONNECT_TIMEOUT
+        while self.vpn_state(name) == "connecting" and time.monotonic() < deadline:
+            time.sleep(0.5)
         return self.vpn_status(name)
 
     def vpn_disconnect(self, name: str) -> str:
-        container, details = self._managed(name)
-        if not (details.get("Config", {}).get("Labels") or {}).get(VPN_LABEL):
-            raise RangeDockError(NO_VPN.format(name=name))
+        container, details = self._vpn_workspace(name)
         if not details.get("State", {}).get("Running"):
             return "workspace stopped"
         self.docker.call(["container", "exec", "--user", "root", container, "touch", VPN_DISABLED])
@@ -355,16 +378,17 @@ class Workbench:
         return "OpenVPN stopped"
 
     def vpn_logs(self, name: str) -> str:
-        container, details = self._managed(name)
-        if not (details.get("Config", {}).get("Labels") or {}).get(VPN_LABEL):
-            raise RangeDockError(NO_VPN.format(name=name))
+        container, _ = self._vpn_workspace(name)
         return self.docker.call(["container", "exec", "--user", "root", container,
                                  "tail", "-n", "40", VPN_LOG])
 
     def desktop_url(self, name: str) -> str:
         container, details = self._managed(name)
         if (details.get("Config", {}).get("Labels") or {}).get(PROFILE_LABEL) != "desktop":
-            raise RangeDockError(f"Workspace '{name}' does not use the desktop image.")
+            raise RangeDockError(
+                f"Workspace '{name}' does not use the desktop image. "
+                "Create a desktop workspace with 'rangedock create NAME --image desktop'."
+            )
         self.start(name)
         for _ in range(50):
             try:
@@ -391,8 +415,19 @@ class Workbench:
             self.docker.call(["container", "exec", "--user", "root", container,
                               "apt-get", "install", "-y", "--no-install-recommends", "burpsuite"],
                              interactive=True)
-        self.docker.call(["container", "exec", "-d", "--env", "DISPLAY=:1", container, "burpsuite"])
+        self._launch_on_desktop(container, ["burpsuite"])
         return url
+
+    def desktop_launch(self, name: str, command: list[str]) -> str:
+        """Start a GUI program on the workspace desktop and return the desktop URL."""
+        if not command:
+            raise RangeDockError("Name a program to launch on the desktop, for example: xterm")
+        url = self.desktop_url(name)
+        self._launch_on_desktop(container_name(name), command)
+        return url
+
+    def _launch_on_desktop(self, container: str, command: list[str]) -> None:
+        self.docker.call(["container", "exec", "-d", "--env", "DISPLAY=:1", container, *command])
 
     def enter(self, name: str) -> None:
         self.start(name)
