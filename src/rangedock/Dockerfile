@@ -1,4 +1,4 @@
-FROM debian:bookworm-slim
+FROM kalilinux/kali-rolling
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -7,6 +7,9 @@ RUN apt-get update \
        bash ca-certificates curl dnsutils git iproute2 iputils-ping jq \
        less netcat-openbsd nmap openssh-client python3 ripgrep tmux vim-tiny \
        wget whois \
+       john hydra sqlmap ffuf gobuster nikto dirb whatweb wfuzz \
+       feroxbuster dnsrecon tcpdump socat proxychains4 \
+       seclists wordlists \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 --shell /bin/bash analyst \
     && mkdir -p /workspace \

@@ -38,6 +38,7 @@ jobs:
       - run: printf 'exit\n' | rangedock open smoke --workspace "$RUNNER_TEMP/rangedock-smoke"
       - run: rangedock info smoke
       - run: rangedock run smoke -- nmap --version
+      - run: rangedock run smoke -- sh -c 'command -v john && command -v hydra && command -v sqlmap && command -v ffuf && test -f /usr/share/wordlists/rockyou.txt.gz && test -f /usr/share/seclists/Discovery/Web-Content/common.txt'
       - run: rangedock run smoke -- sh -c 'echo persisted > /workspace/proof.txt'
       - run: test "$(cat "$RUNNER_TEMP/rangedock-smoke/proof.txt")" = persisted
       - run: rangedock restart smoke

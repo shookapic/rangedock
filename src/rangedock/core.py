@@ -10,7 +10,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-IMAGE = "rangedock:0.2.0"
+IMAGE = "rangedock:0.2.1"
 LABEL = "dev.rangedock.managed"
 WORKSPACE_LABEL = "dev.rangedock.workspace"
 NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")

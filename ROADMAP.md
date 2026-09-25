@@ -16,16 +16,17 @@ and more. RangeDock should reach comparable **daily workflow quality** before cl
 anything like catalog or feature parity. Copying hundreds of tools into one image would
 make the first release slower and harder to maintain.
 
-## Where we are: v0.1
+## Where we are: v0.2.1
 
-Shipped: local image build; named workspaces; create, enter, start, run, list, stop,
-remove; persistent host folders; non-root image; Linux host UID/GID mapping; Docker
-ownership labels; CI and a real Docker lifecycle test. The current base image reports
-about 430 MB on the maintainer's Docker Desktop installation. This is a local image
-measurement, not a download-size promise.
+Shipped: local image build; named workspaces; open, create, enter, start, restart,
+info, run, list, stop, remove; persistent host folders; non-root image; Linux host
+UID/GID mapping; Docker ownership labels; CI and a real Docker lifecycle test. The
+v0.2.1 image adds a curated Kali toolset and wordlists, including John, Hydra, and
+SecLists. The larger image makes a future small base plus specialized profiles more
+important.
 
-Missing for everyday use: a one-command open flow, prebuilt images, update handling,
-workspace inspection, reusable defaults, VPN, GUI, and a broader tool selection.
+Missing for everyday use: prebuilt images, update handling, reusable defaults, VPN,
+GUI, and specialized tool profiles.
 
 ## Release sequence
 

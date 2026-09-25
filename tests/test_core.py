@@ -133,7 +133,7 @@ class WorkbenchTests(unittest.TestCase):
         Workbench(fake).build()
         build = next(call for call in fake.calls if call[0][0] == "build")
         self.assertEqual(build[0], ["build", "--pull", "-t", IMAGE, "-"])
-        self.assertIn("FROM debian:bookworm-slim", build[1])
+        self.assertIn("FROM kalilinux/kali-rolling", build[1])
 
 
 if __name__ == "__main__":
