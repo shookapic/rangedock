@@ -1,6 +1,7 @@
 # RangeDock AI-Assisted CTF Mode (`pwn`)
 
-Status: draft, not implemented
+Status: phases 1-2 implemented (gate, loop, transcript, budget, tier + scope enforcement);
+provider integration (phase 3) not yet built, so the mode is not user-functional
 Target: v0.6.x (after WireGuard and desktop maturity in v0.5)
 Owner: RangeDock maintainers
 
