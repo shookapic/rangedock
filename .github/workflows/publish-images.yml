@@ -32,3 +32,26 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:${{ github.ref_name }}-${{ matrix.profile }}
           sbom: true
           provenance: true
+  verify:
+    needs: publish
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+          - runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Pull and check base without registry credentials
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}-base
+          docker run --rm ghcr.io/${{ github.repository }}:${{ github.ref_name }}-base nmap --version
+      - name: Pull and check web without registry credentials
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}-web
+          docker run --rm ghcr.io/${{ github.repository }}:${{ github.ref_name }}-web sh -c 'command -v john && command -v hydra && test -f /usr/share/seclists/Discovery/Web-Content/common.txt'
+      - name: Pull and check desktop without registry credentials
+        run: |
+          docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}-desktop
+          docker run --rm ghcr.io/${{ github.repository }}:${{ github.ref_name }}-desktop sh -c 'command -v websockify && ! command -v burpsuite'
