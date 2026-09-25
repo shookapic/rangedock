@@ -8,6 +8,7 @@ import webbrowser
 from pathlib import Path
 
 from .core import IMAGES, PROFILES, RangeDockError, Workbench
+from .tour import run_tour, show_tour
 
 
 def workspace_options(command: argparse.ArgumentParser) -> None:
@@ -23,6 +24,10 @@ def main(argv: list[str] | None = None) -> int:
         prog="rangedock", description="Named Docker workspaces for security labs."
     )
     sub = parser.add_subparsers(dest="action", required=True)
+    tour = sub.add_parser("tour", help="learn the workflow or try it in a practice workspace")
+    tour.add_argument("--run", action="store_true", help="create a practice workspace and run the lesson")
+    tour.add_argument("--name", default="tour", help="practice workspace name (default: tour)")
+    tour.add_argument("--workspace", type=Path, help="host folder for the practice workspace")
     sub.add_parser("doctor", help="check Docker and local images")
     build = sub.add_parser("build", help="build an image locally")
     build.add_argument("profile", choices=PROFILES, nargs="?", default="web")
@@ -65,7 +70,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     bench = Workbench()
     try:
-        if args.action == "doctor":
+        if args.action == "tour":
+            if args.run:
+                run_tour(bench, args.name, args.workspace)
+            else:
+                if args.workspace is not None:
+                    raise RangeDockError("--workspace is only used with 'rangedock tour --run'.")
+                show_tour(args.name)
+        elif args.action == "doctor":
             version = bench.linux_daemon()
             print(f"Docker daemon: {version} (Linux containers)")
             for profile in PROFILES:

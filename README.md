@@ -3,6 +3,7 @@
 **A named Docker workspace for every security lab.** Pull a ready image, open a workspace, leave it, and come back to the same files. RangeDock keeps the Docker commands short and keeps workspaces separate.
 
 See the [roadmap](ROADMAP.md) for the path to a dependable free workstation and possible team services.
+New to RangeDock? Start with the [guided tutorial](TUTORIAL.md), or run `rangedock tour` after installing the CLI.
 
 RangeDock is an independent project. It contains original code and Kali-based images; it does not use Exegol code, images, or assets.
 
@@ -48,6 +49,9 @@ If you do not have pipx or uv, see their [pipx installation](https://pipx.pypa.i
 Upgrading from v0.2.x: existing containers remain usable on their original image. New workspaces use v0.3 images. To move an existing workspace to the new image, note its folder with `rangedock info NAME`, then run `rangedock stop NAME`, `rangedock remove NAME`, and `rangedock open NAME --workspace PATH`. Files in the mounted host folder remain; changes stored only inside the old container do not. `rangedock image update web` refreshes the local image tag but never changes existing containers.
 
 ## First workspace
+
+Run `rangedock tour` for a read-only command walkthrough. Run `rangedock tour --run` to try it with a small `base` workspace. The hands-on tour creates `~/rangedock-workspaces/tour/rangedock-tour.txt`, demonstrates that the file survives a container restart, and leaves the practice container stopped. `rangedock remove tour` removes that container while keeping the host files. Use `--name` or `--workspace` to choose another practice location. The base image may download on first use.
+The v0.3.1 CLI uses the tested v0.3.0 images; tutorial changes do not require downloading new images.
 
 ```bash
 rangedock open lab

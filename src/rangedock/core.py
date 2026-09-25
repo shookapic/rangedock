@@ -11,10 +11,10 @@ import time
 from importlib import resources
 from pathlib import Path
 
-VERSION = "0.3.0"
+IMAGE_VERSION = "0.3.0"
 PROFILES = ("base", "web", "desktop")
-IMAGES = {profile: f"rangedock:{VERSION}-{profile}" for profile in PROFILES}
-REMOTE_IMAGES = {profile: f"ghcr.io/shookapic/rangedock:v{VERSION}-{profile}" for profile in PROFILES}
+IMAGES = {profile: f"rangedock:{IMAGE_VERSION}-{profile}" for profile in PROFILES}
+REMOTE_IMAGES = {profile: f"ghcr.io/shookapic/rangedock:v{IMAGE_VERSION}-{profile}" for profile in PROFILES}
 IMAGE = IMAGES["web"]
 LABEL = "dev.rangedock.managed"
 WORKSPACE_LABEL = "dev.rangedock.workspace"

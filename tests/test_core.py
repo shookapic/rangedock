@@ -1,10 +1,13 @@
 import json
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from rangedock.core import (IMAGE, IMAGES, LABEL, PROFILE_LABEL, REMOTE_IMAGES,
                             VPN_LABEL, WORKSPACE_LABEL, RangeDockError, Workbench, valid_name)
+from rangedock.tour import run_tour, show_tour
 
 
 class FakeDocker:
@@ -174,6 +177,34 @@ class WorkbenchTests(unittest.TestCase):
             self.assertIn("/dev/net/tun:/dev/net/tun", create)
             self.assertNotIn("--privileged", create)
             self.assertEqual(bench.info("lab")["vpn"], str(config.resolve()))
+
+    def test_tour_walkthrough_explains_commands_without_docker(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            show_tour("lab")
+        self.assertIn("rangedock doctor", output.getvalue())
+        self.assertIn("rangedock tour --run --name lab", output.getvalue())
+
+    def test_hands_on_tour_preserves_host_file_and_stops_container(self):
+        fake = FakeDocker()
+        bench = Workbench(fake)
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "lab"
+            with redirect_stdout(io.StringIO()):
+                run_tour(bench, "lab", workspace)
+            self.assertIn("This file stays on your host", (workspace / "rangedock-tour.txt").read_text())
+            self.assertFalse(fake.running)
+            cats = [args for args, _, _ in fake.calls if args[:3] == ["container", "exec", "rangedock-lab"] and args[3:] == ["cat", "/workspace/rangedock-tour.txt"]]
+            self.assertEqual(len(cats), 2)
+
+    def test_hands_on_tour_refuses_a_nonempty_folder(self):
+        fake = FakeDocker()
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder)
+            (workspace / "important.txt").write_text("keep", encoding="utf-8")
+            with self.assertRaisesRegex(RangeDockError, "not empty"):
+                run_tour(Workbench(fake), "lab", workspace)
+            self.assertFalse(fake.calls)
 
 
 if __name__ == "__main__":
