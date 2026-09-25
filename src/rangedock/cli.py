@@ -11,7 +11,7 @@ from .completion import command_tree
 from .console import last_workspace, open_console
 from .core import IMAGES, PROFILES, RangeDockError, Workbench
 from .preferences import SETTINGS, Preferences, format_value
-from .pwn import open_pwn
+from .pwn import list_models, open_pwn
 from .profiles import VPN_TYPES, ProfileStore
 from .tools import describe_tool, workspace_tools
 from .tour import run_tour, show_tour
@@ -180,8 +180,11 @@ def build_parser() -> argparse.ArgumentParser:
                          help="check that the workspace uses this VPN profile and connect it")
     console.add_argument("--plain", action="store_true", help="simple line prompt without menus or colors")
     pwn = sub.add_parser("pwn", help="EXPERIMENTAL: AI-assisted CTF mode; AI proposes, you approve each command")
-    pwn.add_argument("name")
-    pwn.add_argument("--target", required=True, metavar="HOST", help="the host you are authorized to test")
+    pwn.add_argument("name", nargs="?")
+    pwn.add_argument("--target", metavar="HOST", help="the host you are authorized to test")
+    pwn.add_argument("--model", metavar="PROVIDER/MODEL", help="opencode model; omit to type commands yourself")
+    pwn.add_argument("--list-models", action="store_true", dest="list_models",
+                     help="list opencode models and exit")
     pwn.add_argument("--max-steps", type=int, default=40, dest="max_steps",
                      help="stop after this many executed commands (default: 40)")
     tools = sub.add_parser("tools", help="list the tools a workspace image provides")
@@ -310,8 +313,12 @@ def main(argv: list[str] | None = None) -> int:
             open_console(bench, name, tree=command_tree(build_parser()), dispatch=main,
                          plain=args.plain, preferences=preferences)
         elif args.action == "pwn":
+            if args.list_models:
+                return list_models()
+            if not args.name or not args.target:
+                raise RangeDockError("rangedock pwn needs NAME and --target HOST (or use --list-models).")
             bench.info(args.name)
-            return open_pwn(bench, args.name, target=args.target, max_steps=args.max_steps)
+            return open_pwn(bench, args.name, target=args.target, model=args.model, max_steps=args.max_steps)
         elif args.action == "tools":
             show_tools(bench, args.name, args.tool)
         elif args.action == "bench":

@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import re
 import shlex
+import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -88,7 +90,7 @@ class PwnProvider(Protocol):
 
 
 class StdinProvider:
-    """Phase 1 stub: the operator types the next command. Proves the loop without a model."""
+    """Stub: the operator types the next command. Proves the loop without a model."""
 
     def list_models(self) -> list[str]:
         return []
@@ -100,6 +102,102 @@ class StdinProvider:
             return None
         words = shlex.split(line)
         return Proposal(words) if words else None
+
+
+JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+BARE_JSON_RE = re.compile(r"\{[^{}]*\"command\"[^{}]*\}", re.DOTALL)
+
+
+def parse_proposal(text: str) -> Proposal | None:
+    """Extract {"command": [...], "reasoning": "..."} from a model reply.
+
+    Returns None when the reply has no usable command (unparseable, or an empty command
+    meaning 'stop'). ponytail: depends on the model returning the requested JSON; a fenced
+    block is preferred, with a bare object as fallback.
+    """
+    candidates = JSON_BLOCK_RE.findall(text) or BARE_JSON_RE.findall(text)
+    for blob in reversed(candidates):
+        try:
+            data = json.loads(blob)
+        except json.JSONDecodeError:
+            continue
+        command = data.get("command")
+        if isinstance(command, list) and all(isinstance(word, str) for word in command) and command:
+            return Proposal(command, str(data.get("reasoning", "")))
+    return None
+
+
+def build_prompt(session: "PwnSession") -> str:
+    """The instruction sent to the model for the next single command."""
+    lines = [
+        f"You are assisting with an authorized CTF against target {session.target}.",
+        "Propose exactly ONE next shell command to run inside the workspace.",
+        "Every argument that names a host must be the target; never touch another host.",
+        "Reply ONLY with a JSON code block:",
+        '```json',
+        '{"command": ["tool", "arg", "..."], "reasoning": "one short line"}',
+        '```',
+        'To stop, reply with {"command": []}.',
+    ]
+    if session.tool_names:
+        lines.append("Tools available in the workspace: " + ", ".join(sorted(session.tool_names)) + ".")
+    if session.history:
+        lines.append("Commands run so far (argv -> exit code):")
+        for argv, code in session.history[-20:]:
+            lines.append(f"  {shlex.join(argv)} -> {code}")
+    else:
+        lines.append("No commands have run yet.")
+    return "\n".join(lines)
+
+
+class OpencodeProvider:
+    """Proposals from a model via the opencode CLI (`opencode run`, `opencode models`).
+
+    ponytail: verified against opencode's documented flags, not a live run; the model does
+    not yet see command output, only the argv/exit-code history. Add output feedback later.
+    """
+
+    def __init__(self, model: str | None = None, run: Callable[..., subprocess.CompletedProcess] | None = None):
+        self.model = model
+        self._run = run or self._subprocess
+
+    @staticmethod
+    def available() -> bool:
+        return shutil.which("opencode") is not None
+
+    def _subprocess(self, args: list[str]) -> subprocess.CompletedProcess:
+        exe = shutil.which("opencode")
+        if exe is None:
+            raise RangeDockError("opencode is not on PATH.")
+        cmd = [exe, *args]
+        try:
+            # A Windows .cmd/.bat shim (npm installs one) cannot be launched directly;
+            # run it through the shell with arguments quoted.
+            if sys.platform == "win32" and exe.lower().endswith((".cmd", ".bat")):
+                return subprocess.run(subprocess.list2cmdline(cmd), capture_output=True, text=True, shell=True)
+            return subprocess.run(cmd, capture_output=True, text=True)
+        except OSError as exc:
+            raise RangeDockError(f"Could not run opencode: {exc}") from exc
+
+    def list_models(self) -> list[str]:
+        result = self._run(["models"])
+        if result.returncode != 0:
+            raise RangeDockError(f"opencode models failed: {result.stderr.strip() or result.returncode}")
+        return [line.strip() for line in result.stdout.splitlines() if "/" in line]
+
+    def propose(self, session: "PwnSession") -> Proposal | None:
+        args = ["run"]
+        if self.model:
+            args += ["--model", self.model]
+        args.append(build_prompt(session))
+        result = self._run(args)
+        if result.returncode != 0:
+            session.echo(f"opencode run failed: {result.stderr.strip() or result.returncode}")
+            return None
+        proposal = parse_proposal(result.stdout)
+        if proposal is None:
+            session.echo("Model returned no usable command; stopping.")
+        return proposal
 
 
 def transcript_path(name: str) -> Path:
@@ -120,6 +218,8 @@ class PwnSession:
         self.steps = 0
         self.cwd = DEFAULT_CWD
         self.transcript = transcript_path(self.name)
+        self.history: list[tuple[list[str], int]] = []
+        self.tool_names: set[str] = set()
 
     def record(self, event: str, **fields) -> None:
         entry = {"time": datetime.now(timezone.utc).isoformat(), "event": event, **fields}
@@ -179,10 +279,19 @@ class PwnSession:
         elapsed = time.monotonic() - started
         self.echo(f"[exit {code} · {elapsed:.2f}s]")
         self.record("executed", argv=argv, exit_code=code, seconds=round(elapsed, 3))
+        self.history.append((argv, code))
         return code
+
+    def load_tools(self) -> None:
+        from .tools import workspace_tools  # imported here to keep the module import light
+        try:
+            self.tool_names = {tool.name for tool in workspace_tools(self.bench, self.name).tools}
+        except RangeDockError:
+            self.tool_names = set()
 
     def run(self) -> int:
         self.bench.start(self.name)
+        self.load_tools()
         create_private_file(self.transcript)
         self.record("session_start", workspace=self.name, target=self.target, max_steps=self.max_steps)
         if not self.authorize():
@@ -227,9 +336,27 @@ class PwnSession:
         return 0
 
 
-def open_pwn(bench: Workbench, name: str, *, target: str, max_steps: int = 40) -> int:
+def select_provider(model: str | None) -> PwnProvider:
+    """A model means use opencode; otherwise the manual stub drives the loop."""
+    if model:
+        if not OpencodeProvider.available():
+            raise RangeDockError("opencode is not on PATH. Install it, or run without --model to type commands.")
+        return OpencodeProvider(model)
+    return StdinProvider()
+
+
+def list_models() -> int:
+    if not OpencodeProvider.available():
+        raise RangeDockError("opencode is not on PATH; cannot list models.")
+    for name in OpencodeProvider().list_models():
+        print(name)
+    return 0
+
+
+def open_pwn(bench: Workbench, name: str, *, target: str, model: str | None = None,
+             max_steps: int = 40) -> int:
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise RangeDockError("rangedock pwn needs an interactive terminal.")
-    session = PwnSession(bench, name, target=target, provider=StdinProvider(),
+    session = PwnSession(bench, name, target=target, provider=select_provider(model),
                          prompt=input, echo=print, max_steps=max_steps)
     return session.run()

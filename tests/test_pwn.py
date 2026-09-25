@@ -5,8 +5,12 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import subprocess
+
 from rangedock.config import config_dir
-from rangedock.pwn import Proposal, PwnSession, classify, hosts_in, out_of_scope
+from rangedock.core import RangeDockError
+from rangedock.pwn import (OpencodeProvider, Proposal, PwnSession, build_prompt, classify,
+                           hosts_in, out_of_scope, parse_proposal)
 
 
 class FakeBench:
@@ -17,6 +21,9 @@ class FakeBench:
 
     def start(self, name):
         self.started.append(name)
+
+    def capture(self, name, command, workdir="/workspace"):
+        raise RangeDockError("no manifest in fake workspace")
 
     def execute(self, name, argv, workdir="/workspace"):
         self.executed.append((name, argv, workdir))
@@ -143,6 +150,58 @@ class ScopeEnforcementTests(PwnSessionTests):
         self.assertEqual(session.bench.executed, [])
         events = [entry["event"] for entry in self.transcript_events(session)]
         self.assertIn("blocked_out_of_scope", events)
+
+
+def completed(stdout="", returncode=0, stderr=""):
+    return subprocess.CompletedProcess(args=["opencode"], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+class ParseProposalTests(unittest.TestCase):
+    def test_reads_a_fenced_json_command(self):
+        text = 'Here is my plan.\n```json\n{"command": ["nmap", "-sV", "10.0.0.1"], "reasoning": "enumerate"}\n```'
+        proposal = parse_proposal(text)
+        self.assertEqual(proposal.argv, ["nmap", "-sV", "10.0.0.1"])
+        self.assertEqual(proposal.reasoning, "enumerate")
+
+    def test_empty_command_means_stop(self):
+        self.assertIsNone(parse_proposal('```json\n{"command": []}\n```'))
+
+    def test_garbage_returns_none(self):
+        self.assertIsNone(parse_proposal("no json here"))
+        self.assertIsNone(parse_proposal('```json\n{"command": "nmap"}\n```'))
+
+
+class OpencodeProviderTests(unittest.TestCase):
+    def test_list_models_parses_provider_slash_model_lines(self):
+        provider = OpencodeProvider(run=lambda args: completed("anthropic/claude-3-5-sonnet\nopenai/gpt-4o\nnoise\n"))
+        self.assertEqual(provider.list_models(), ["anthropic/claude-3-5-sonnet", "openai/gpt-4o"])
+
+    def test_propose_passes_model_and_parses_reply(self):
+        seen = {}
+
+        def run(args):
+            seen["args"] = args
+            return completed('```json\n{"command": ["id"], "reasoning": "who am i"}\n```')
+
+        provider = OpencodeProvider(model="anthropic/x", run=run)
+        session = mock.Mock(target="10.0.0.1", tool_names=set(), history=[])
+        proposal = provider.propose(session)
+        self.assertEqual(proposal.argv, ["id"])
+        self.assertEqual(seen["args"][:3], ["run", "--model", "anthropic/x"])
+
+    def test_failed_run_returns_none(self):
+        session = mock.Mock(target="10.0.0.1", tool_names=set(), history=[], echo=lambda _t: None)
+        provider = OpencodeProvider(run=lambda args: completed(returncode=1, stderr="boom"))
+        self.assertIsNone(provider.propose(session))
+
+
+class BuildPromptTests(unittest.TestCase):
+    def test_prompt_names_target_and_history(self):
+        session = mock.Mock(target="10.0.0.1", tool_names={"nmap"}, history=[(["nmap", "10.0.0.1"], 0)])
+        prompt = build_prompt(session)
+        self.assertIn("10.0.0.1", prompt)
+        self.assertIn("nmap", prompt)
+        self.assertIn("-> 0", prompt)
 
 
 if __name__ == "__main__":
