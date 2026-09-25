@@ -26,6 +26,7 @@ jobs:
       - run: python -m pip install -e .
       - run: python -m unittest discover -s tests -v
       - run: rangedock --help
+      - run: rangedock tour
   image:
     runs-on: ubuntu-latest
     steps:
@@ -37,6 +38,10 @@ jobs:
       - run: rangedock build desktop
       - run: rangedock build web
       - run: rangedock build base
+      - run: rangedock tour --run --name tutorial-smoke --workspace "$RUNNER_TEMP/rangedock-tour-smoke"
+      - run: |
+          test -f "$RUNNER_TEMP/rangedock-tour-smoke/rangedock-tour.txt"
+          test "$(docker inspect rangedock-tutorial-smoke --format '{{.State.Running}}')" = false
       - run: docker run --rm rangedock:0.3.0-desktop sh -c '! command -v burpsuite'
       - run: printf 'exit\n' | rangedock open smoke --workspace "$RUNNER_TEMP/rangedock-smoke"
       - run: rangedock info smoke
