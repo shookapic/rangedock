@@ -2,6 +2,8 @@
 
 **A named Docker workspace for every security lab.** Build one small tools image, create a workspace, enter it, leave it, and come back to the same files. RangeDock keeps the Docker commands short and keeps workspaces separate.
 
+See the [roadmap](ROADMAP.md) for the path from this first release to a dependable free workstation and possible team services.
+
 RangeDock is an independent project. It contains original code and a Debian-based image; it does not use Exegol code, images, or assets.
 
 ## What it does
