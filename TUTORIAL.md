@@ -31,6 +31,8 @@ rangedock enter tour
 
 Inside the shell, try `pwd`, `ls /workspace`, and `nmap --version`. Type `exit` to leave. You can re-enter the same workspace later.
 
+For a guided prompt instead of plain Bash, run `rangedock console tour`. Type `nm` and press `Tab` to complete `nmap`, press `Ctrl-K` for the command palette, and `Ctrl-D` to leave.
+
 ```bash
 rangedock stop tour
 rangedock remove tour
@@ -56,6 +58,6 @@ rangedock burp gui-lab
 
 The desktop opens through a localhost browser URL. Burp is installed inside your own container when you request it; its first launch may take time and ask you to accept its terms. The public desktop image does not bundle Burp.
 
-If you have an OpenVPN client configuration, create a VPN workspace with `rangedock create vpn-lab --vpn PATH/TO/client.ovpn`, then check `rangedock vpn status vpn-lab` and `rangedock vpn logs vpn-lab`. Keep files referenced by the configuration in the same directory, using relative paths.
+If you have an OpenVPN client configuration, save it once with `rangedock vpn profile add htb --config PATH/TO/client.ovpn`, create a VPN workspace with `rangedock create vpn-lab --vpn-profile htb`, then check `rangedock vpn status vpn-lab` and `rangedock vpn logs vpn-lab`. Keep files referenced by the configuration in the same directory, using relative paths. `--vpn PATH` works too if you prefer not to save a profile.
 
 See the [README](README.md) for all commands and the [roadmap](ROADMAP.md) for planned features.

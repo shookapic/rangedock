@@ -92,6 +92,44 @@ rangedock vpn disconnect vpn-lab
 
 RangeDock mounts the config directory read-only at `/vpn`, so put referenced credential and certificate files in that directory and use relative paths in the config. VPN workspaces receive only `NET_ADMIN` and `/dev/net/tun`; other workspaces do not. OpenVPN reconnects when a configured workspace is restarted through RangeDock. `vpn status` reports whether the process is running; inspect `vpn logs` to confirm tunnel negotiation. Device support depends on the Docker host. WireGuard is not yet supported.
 
+### Saved VPN profiles
+
+Save a config once and select it by name when creating workspaces:
+
+```bash
+rangedock vpn profile add htb --config ~/vpn/htb/client.ovpn
+rangedock vpn profile list
+rangedock vpn profile show htb
+rangedock create htb-box --vpn-profile htb
+rangedock vpn connect htb-box --profile htb
+rangedock vpn profile remove htb
+```
+
+A profile records the config path and its directory; RangeDock never copies or reads key material. Profiles live in `~/.config/rangedock/profiles.toml` (or `$XDG_CONFIG_HOME/rangedock/`) on Linux and macOS and in `%APPDATA%\RangeDock\profiles.toml` on Windows, readable only by you where the platform supports permissions. Removing a profile only forgets the name: the config, certificates, and keys stay on disk, and workspaces already created from it keep working. A profile applies to new workspaces; `--vpn PATH` remains available for one-off use.
+
+## Interactive lab console
+
+```bash
+rangedock console htb-box
+rangedock console htb-box --profile htb
+rangedock console --last
+```
+
+The console is a prompt for one existing workspace. It starts the workspace if needed but never creates one. Commands run inside the workspace with its usual user, mounts, and capabilities, and each shows its exit code and duration. `Tab` completes installed tools and their common options, workspace names, VPN profiles, and `rangedock` subcommands. `Ctrl-K` opens a command palette (workspace info, VPN status, desktop, image list, and more), `Ctrl-R` searches history, `Ctrl-C` stops the running command, and `Ctrl-D` leaves the console while the workspace keeps running.
+
+Inside the console, `cd PATH` sets the directory for later commands, `help` lists console commands, `help TOOL` shows a tool's `--help` and adds its options to completion, and `rangedock ...` runs RangeDock commands. Commands without shell syntax run as an argument vector; pipes, redirects, and variables go to the workspace's Bash. Nothing is sent to a network service.
+
+History is stored per workspace in the RangeDock config directory, on the host. End a command with `# no-save` to keep it out of the history file, or turn history off in `config.toml` next to `profiles.toml`:
+
+```toml
+[console]
+history = false
+```
+
+Use `rangedock console NAME --plain` for a simple line prompt without menus or colors; it is also used automatically when input is not a terminal. `NO_COLOR` disables colors in the full console. `rangedock enter NAME` remains the plain Bash shell.
+
+Completion reads the tool manifest at `/usr/share/rangedock/tools.json`, generated while each image is built. `rangedock tools NAME` shows it. Images built before the manifest existed fall back to the catalog bundled with the CLI, limited to commands found in the workspace.
+
 Other commands:
 
 ```bash
@@ -100,6 +138,7 @@ rangedock info lab
 rangedock start lab
 rangedock restart lab
 rangedock run lab -- nmap --version
+rangedock tools lab
 rangedock stop lab
 rangedock remove lab
 ```

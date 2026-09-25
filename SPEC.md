@@ -1,6 +1,6 @@
 # RangeDock Profiles and Interactive Lab Console
 
-Status: proposed feature spec  
+Status: phases 1-3 implemented; phase 4 open  
 Target: v0.4.x and v0.5.x  
 Owner: RangeDock maintainers
 

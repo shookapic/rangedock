@@ -25,7 +25,10 @@ user-installed Burp; and opt-in OpenVPN with scoped device/capability access. Th
 image measured about 566 MB and the web image about 4.26 GB locally on the maintainer's
 Docker Desktop. These are local measurements, not compressed download sizes.
 
-Missing for broader use: WireGuard, saved local profiles, persistent desktop settings
+Since then: saved VPN profiles, an interactive lab console with local completion and
+history, and a per-image tool manifest (see [SPEC.md](SPEC.md)).
+
+Missing for broader use: WireGuard, saved workspace profiles, persistent desktop settings
 across container recreation, image vulnerability gates, VPN DNS verification, and a
 supported-platform benchmark matrix.
 

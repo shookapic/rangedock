@@ -20,10 +20,13 @@ LABEL = "dev.rangedock.managed"
 WORKSPACE_LABEL = "dev.rangedock.workspace"
 PROFILE_LABEL = "dev.rangedock.profile"
 VPN_LABEL = "dev.rangedock.vpn"
+VPN_PROFILE_LABEL = "dev.rangedock.vpn-profile"
+VPN_SUFFIXES = (".ovpn", ".conf")
 VPN_PID = "/run/rangedock-openvpn.pid"
 VPN_LOG = "/run/rangedock-openvpn.log"
 VPN_DISABLED = "/run/rangedock-vpn-disabled"
 NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
+NO_VPN = "Workspace '{name}' has no VPN config. Create one with --vpn FILE or --vpn-profile NAME."
 
 
 class RangeDockError(Exception):
@@ -47,6 +50,13 @@ class Docker:
             raise RangeDockError(detail or f"Docker command failed with exit code {result.returncode}")
         return (result.stdout or "").strip()
 
+    def status(self, args: list[str]) -> int:
+        """Run an interactive Docker command and return its exit code instead of raising."""
+        try:
+            return subprocess.run(["docker", *args], check=False).returncode
+        except FileNotFoundError as exc:
+            raise RangeDockError("Docker CLI not found. Install Docker Desktop or Docker Engine.") from exc
+
 
 def valid_name(name: str) -> str:
     if not NAME_RE.fullmatch(name):
@@ -62,6 +72,21 @@ def valid_profile(profile: str) -> str:
     if profile not in PROFILES:
         raise RangeDockError(f"Image must be one of: {', '.join(PROFILES)}")
     return profile
+
+
+def resolve_vpn_config(path: Path) -> Path:
+    config = path.expanduser().resolve()
+    if not config.is_file():
+        raise RangeDockError(f"VPN config not found: {config}")
+    if config.suffix.lower() not in VPN_SUFFIXES:
+        raise RangeDockError(f"VPN config must be an OpenVPN .ovpn or .conf file: {config}")
+    if "," in str(config.parent):
+        raise RangeDockError("VPN directory path cannot contain a comma (Docker mount syntax).")
+    return config
+
+
+def tty_flags() -> str:
+    return "-it" if sys.stdin.isatty() and sys.stdout.isatty() else "-i"
 
 
 def host_user_options() -> list[str]:
@@ -135,9 +160,13 @@ class Workbench:
         return container in output.splitlines()
 
     def create(self, name: str, workspace: Path | None = None, *,
-               profile: str = "web", vpn: Path | None = None) -> Path:
+               profile: str = "web", vpn: Path | None = None,
+               vpn_profile: str | None = None) -> Path:
         container = container_name(name)
         profile = valid_profile(profile)
+        if vpn_profile is not None and vpn is None:
+            raise RangeDockError("A VPN profile name needs its config path.")
+        config = resolve_vpn_config(vpn) if vpn is not None else None
         self.linux_daemon()
         if self.container_exists(name):
             raise RangeDockError(f"Container '{container}' already exists. Use 'rangedock open {name}' or another name.")
@@ -159,17 +188,14 @@ class Workbench:
         if not folder.is_dir():
             raise RangeDockError(f"Workspace path is not a directory: {folder}")
         vpn_options = []
-        if vpn is not None:
-            config = vpn.expanduser().resolve()
-            if not config.is_file() or config.suffix.lower() not in (".ovpn", ".conf"):
-                raise RangeDockError("--vpn must point to an existing OpenVPN .ovpn or .conf file.")
-            if "," in str(config.parent):
-                raise RangeDockError("VPN directory path cannot contain a comma (Docker mount syntax).")
+        if config is not None:
             vpn_options = [
                 "--label", f"{VPN_LABEL}={config}",
                 "--mount", f"type=bind,source={config.parent},target=/vpn,readonly",
                 "--cap-add", "NET_ADMIN", "--device", "/dev/net/tun:/dev/net/tun",
             ]
+            if vpn_profile is not None:
+                vpn_options += ["--label", f"{VPN_PROFILE_LABEL}={vpn_profile}"]
         desktop_options = ["--publish", "127.0.0.1::6080"] if profile == "desktop" else []
         self.docker.call([
             "container", "create", "--name", container,
@@ -184,7 +210,8 @@ class Workbench:
         return folder
 
     def open(self, name: str, workspace: Path | None = None, *,
-             profile: str | None = None, vpn: Path | None = None) -> None:
+             profile: str | None = None, vpn: Path | None = None,
+             vpn_profile: str | None = None) -> None:
         if self.container_exists(name):
             existing = self.info(name)
             if workspace is not None and workspace.expanduser().resolve() != Path(existing["workspace"]):
@@ -196,7 +223,7 @@ class Workbench:
             if vpn is not None and str(vpn.expanduser().resolve()) != existing["vpn"]:
                 raise RangeDockError(f"Workspace '{name}' already uses VPN config {existing['vpn']}.")
         else:
-            self.create(name, workspace, profile=profile or "web", vpn=vpn)
+            self.create(name, workspace, profile=profile or "web", vpn=vpn, vpn_profile=vpn_profile)
         self.enter(name)
 
     def info(self, name: str) -> dict[str, str]:
@@ -210,6 +237,7 @@ class Workbench:
             "profile": labels.get(PROFILE_LABEL, "legacy"),
             "workspace": labels.get(WORKSPACE_LABEL, "unknown"),
             "vpn": labels.get(VPN_LABEL, "none"),
+            "vpn_profile": labels.get(VPN_PROFILE_LABEL, "none"),
             "created": details.get("Created", "unknown"),
         }
 
@@ -279,15 +307,31 @@ class Workbench:
         container, details = self._managed(name)
         labels = details.get("Config", {}).get("Labels") or {}
         if not labels.get(VPN_LABEL):
-            raise RangeDockError(f"Workspace '{name}' has no VPN config. Create one with --vpn FILE.")
+            raise RangeDockError(NO_VPN.format(name=name))
         if not details.get("State", {}).get("Running"):
-            return "workspace stopped"
-        return "OpenVPN process running" if self._vpn_running(container) else "OpenVPN process stopped"
+            state = "workspace stopped"
+        else:
+            state = "OpenVPN process running" if self._vpn_running(container) else "OpenVPN process stopped"
+        profile = labels.get(VPN_PROFILE_LABEL)
+        return f"{state} (profile {profile})" if profile else state
+
+    def vpn_active(self, name: str) -> bool:
+        container, details = self._managed(name)
+        return bool(details.get("State", {}).get("Running")) and self._vpn_running(container)
+
+    def check_vpn_profile(self, name: str, profile: str, config: Path) -> None:
+        """Refuse to treat a workspace as using a profile whose config it does not mount."""
+        current = self.info(name)["vpn"]
+        if current != str(config.expanduser().resolve()):
+            raise RangeDockError(
+                f"Workspace '{name}' does not use VPN profile '{profile}' (VPN config: {current}). "
+                "Profiles apply when a workspace is created."
+            )
 
     def vpn_connect(self, name: str) -> str:
         container, details = self._managed(name)
         if not (details.get("Config", {}).get("Labels") or {}).get(VPN_LABEL):
-            raise RangeDockError(f"Workspace '{name}' has no VPN config. Create one with --vpn FILE.")
+            raise RangeDockError(NO_VPN.format(name=name))
         if not details.get("State", {}).get("Running"):
             self.docker.call(["container", "start", container])
             self._reset_vpn(container, details)
@@ -299,7 +343,7 @@ class Workbench:
     def vpn_disconnect(self, name: str) -> str:
         container, details = self._managed(name)
         if not (details.get("Config", {}).get("Labels") or {}).get(VPN_LABEL):
-            raise RangeDockError(f"Workspace '{name}' has no VPN config. Create one with --vpn FILE.")
+            raise RangeDockError(NO_VPN.format(name=name))
         if not details.get("State", {}).get("Running"):
             return "workspace stopped"
         self.docker.call(["container", "exec", "--user", "root", container, "touch", VPN_DISABLED])
@@ -313,7 +357,7 @@ class Workbench:
     def vpn_logs(self, name: str) -> str:
         container, details = self._managed(name)
         if not (details.get("Config", {}).get("Labels") or {}).get(VPN_LABEL):
-            raise RangeDockError(f"Workspace '{name}' has no VPN config. Create one with --vpn FILE.")
+            raise RangeDockError(NO_VPN.format(name=name))
         return self.docker.call(["container", "exec", "--user", "root", container,
                                  "tail", "-n", "40", VPN_LOG])
 
@@ -353,8 +397,7 @@ class Workbench:
     def enter(self, name: str) -> None:
         self.start(name)
         container = container_name(name)
-        flags = "-it" if sys.stdin.isatty() and sys.stdout.isatty() else "-i"
-        self.docker.call(["container", "exec", flags, container, "bash"], interactive=True)
+        self.docker.call(["container", "exec", tty_flags(), container, "bash"], interactive=True)
 
     def run(self, name: str, command: list[str]) -> None:
         if not command:
@@ -362,6 +405,20 @@ class Workbench:
         self.start(name)
         container = container_name(name)
         self.docker.call(["container", "exec", container, *command], interactive=True)
+
+    def execute(self, name: str, command: list[str], *, workdir: str = "/workspace") -> int:
+        """Run a command attached to the terminal and return its exit code."""
+        container, details = self._managed(name)
+        if not details.get("State", {}).get("Running"):
+            self.start(name)
+        return self.docker.status(["container", "exec", tty_flags(), "--workdir", workdir, container, *command])
+
+    def capture(self, name: str, command: list[str], *, workdir: str = "/workspace") -> str:
+        """Run a non-interactive command in a running workspace and return its output."""
+        container, details = self._managed(name)
+        if not details.get("State", {}).get("Running"):
+            self.start(name)
+        return self.docker.call(["container", "exec", "--workdir", workdir, container, *command])
 
     def list(self) -> list[dict]:
         self.daemon()

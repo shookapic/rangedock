@@ -5,8 +5,8 @@ import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from rangedock.core import (IMAGE, IMAGES, LABEL, PROFILE_LABEL, REMOTE_IMAGES,
-                            VPN_LABEL, WORKSPACE_LABEL, RangeDockError, Workbench, valid_name)
+from rangedock.core import (IMAGE, IMAGES, LABEL, PROFILE_LABEL, REMOTE_IMAGES, VPN_LABEL,
+                            VPN_PROFILE_LABEL, WORKSPACE_LABEL, RangeDockError, Workbench, valid_name)
 from rangedock.tour import run_tour, show_tour
 
 
@@ -19,11 +19,20 @@ class FakeDocker:
         self.workspace = ""
         self.profile = "web"
         self.vpn = None
+        self.vpn_profile = None
         self.image = IMAGE
         self.platform = "linux"
+        self.exec_handler = None
+        self.exit_code = 0
+
+    def status(self, args):
+        self.calls.append((args, None, True))
+        return self.exit_code
 
     def call(self, args, *, input_text=None, interactive=False):
         self.calls.append((args, input_text, interactive))
+        if args[:2] == ["container", "exec"] and self.exec_handler is not None:
+            return self.exec_handler(args)
         if args[0] == "version":
             return "29.0"
         if args[0] == "info":
@@ -40,6 +49,8 @@ class FakeDocker:
                                 if value.startswith(f"{PROFILE_LABEL}="))
             self.vpn = next((value.removeprefix(f"{VPN_LABEL}=") for value in args
                              if value.startswith(f"{VPN_LABEL}=")), None)
+            self.vpn_profile = next((value.removeprefix(f"{VPN_PROFILE_LABEL}=") for value in args
+                                     if value.startswith(f"{VPN_PROFILE_LABEL}=")), None)
             self.image = args[-1]
             return "container-id"
         if args[:2] == ["container", "inspect"]:
@@ -48,7 +59,8 @@ class FakeDocker:
             return json.dumps({
                 "Config": {
                     "Labels": {LABEL: "true" if self.managed else "false", WORKSPACE_LABEL: self.workspace,
-                               PROFILE_LABEL: self.profile, **({VPN_LABEL: self.vpn} if self.vpn else {})},
+                               PROFILE_LABEL: self.profile, **({VPN_LABEL: self.vpn} if self.vpn else {}),
+                               **({VPN_PROFILE_LABEL: self.vpn_profile} if self.vpn_profile else {})},
                     "Image": self.image,
                 },
                 "State": {"Running": self.running, "Status": "running" if self.running else "exited"},

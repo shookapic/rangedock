@@ -7,7 +7,11 @@ import sys
 import webbrowser
 from pathlib import Path
 
+from .completion import command_tree
+from .console import last_workspace, open_console
 from .core import IMAGES, PROFILES, RangeDockError, Workbench
+from .profiles import VPN_TYPES, ProfileStore
+from .tools import workspace_tools
 from .tour import run_tour, show_tour
 
 
@@ -16,10 +20,48 @@ def workspace_options(command: argparse.ArgumentParser) -> None:
     source.add_argument("--workspace", type=Path, help="host folder to mount at /workspace")
     source.add_argument("--cwd", action="store_true", help="mount the current folder at /workspace")
     command.add_argument("--image", choices=PROFILES, help="image profile (default: web)")
-    command.add_argument("--vpn", type=Path, help="OpenVPN .ovpn/.conf file; enables NET_ADMIN and /dev/net/tun")
+    vpn = command.add_mutually_exclusive_group()
+    vpn.add_argument("--vpn", type=Path, help="OpenVPN .ovpn/.conf file; enables NET_ADMIN and /dev/net/tun")
+    vpn.add_argument("--vpn-profile", metavar="PROFILE", help="saved VPN profile (see 'rangedock vpn profile')")
 
 
-def main(argv: list[str] | None = None) -> int:
+def vpn_config(args: argparse.Namespace, store: ProfileStore) -> tuple[Path | None, str | None]:
+    """Return the VPN config path and profile name selected by --vpn or --vpn-profile."""
+    if args.vpn_profile is None:
+        return args.vpn, None
+    profile = store.resolve(args.vpn_profile)
+    return profile.config, profile.name
+
+
+def require_profile(bench: Workbench, store: ProfileStore, name: str, profile_name: str) -> None:
+    profile = store.get(profile_name)
+    bench.check_vpn_profile(name, profile.name, profile.config)
+
+
+def show_profiles(store: ProfileStore) -> None:
+    profiles = store.list()
+    if not profiles:
+        print("No VPN profiles yet. Add one with 'rangedock vpn profile add NAME --config FILE'.")
+    for profile in profiles:
+        print(f"{profile.name:<16} {profile.type:<8} {'ready' if profile.available else 'missing':<8} {profile.config}")
+    for profile in profiles:
+        if not profile.available:
+            print(f"rangedock: warning: VPN profile '{profile.name}' points to a missing file: {profile.config}",
+                  file=sys.stderr)
+
+
+def show_profile(store: ProfileStore, name: str) -> None:
+    profile = store.get(name)
+    print(f"{'Name':<11} {profile.name}")
+    print(f"{'Type':<11} {profile.type}")
+    print(f"{'Config':<11} {profile.config}")
+    print(f"{'Mounted':<11} {profile.config_dir} -> /vpn (read-only)")
+    print(f"{'Status':<11} {'ready' if profile.available else 'missing'}")
+    if not profile.available:
+        print(f"rangedock: warning: config file is missing: {profile.config}", file=sys.stderr)
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rangedock", description="Named Docker workspaces for security labs."
     )
@@ -63,12 +105,47 @@ def main(argv: list[str] | None = None) -> int:
     burp = sub.add_parser("burp", help="install Burp into your desktop workspace and launch it")
     burp.add_argument("name")
     burp.add_argument("--no-browser", action="store_true", help="only print the localhost URL")
-    vpn = sub.add_parser("vpn", help="control OpenVPN in a workspace")
+    vpn = sub.add_parser("vpn", help="control OpenVPN in a workspace and manage VPN profiles")
     vpn_sub = vpn.add_subparsers(dest="vpn_action", required=True)
-    for action in ("status", "connect", "disconnect", "logs"):
-        vpn_sub.add_parser(action).add_argument("name")
-    args = parser.parse_args(argv)
+    for action, help_text in [
+        ("status", "show whether OpenVPN is running"),
+        ("connect", "start OpenVPN, starting the workspace if needed"),
+        ("disconnect", "stop OpenVPN until the next connect"),
+        ("logs", "show the latest OpenVPN log lines"),
+    ]:
+        command = vpn_sub.add_parser(action, help=help_text)
+        command.add_argument("name")
+        if action == "connect":
+            command.add_argument("--profile", dest="vpn_profile", metavar="PROFILE",
+                                 help="check that the workspace uses this VPN profile")
+    profile = vpn_sub.add_parser("profile", help="save, list, show, or remove named VPN profiles")
+    profile_sub = profile.add_subparsers(dest="profile_action", required=True)
+    add = profile_sub.add_parser("add", help="remember a VPN config by name (files are not copied)")
+    add.add_argument("profile_name", metavar="NAME")
+    add.add_argument("--config", type=Path, required=True, help="OpenVPN .ovpn/.conf file")
+    add.add_argument("--type", dest="vpn_type", choices=VPN_TYPES, default="openvpn", help="VPN type")
+    profile_sub.add_parser("list", help="show saved VPN profiles")
+    for action, help_text in [
+        ("show", "show one VPN profile"),
+        ("remove", "forget a VPN profile; its files stay on disk"),
+    ]:
+        profile_sub.add_parser(action, help=help_text).add_argument("profile_name", metavar="NAME")
+    console = sub.add_parser("console", help="open the interactive lab console for a workspace")
+    target = console.add_mutually_exclusive_group(required=True)
+    target.add_argument("name", nargs="?")
+    target.add_argument("--last", action="store_true", help="reopen the most recent console workspace")
+    console.add_argument("--profile", dest="vpn_profile", metavar="VPN_PROFILE",
+                         help="check that the workspace uses this VPN profile and connect it")
+    console.add_argument("--plain", action="store_true", help="simple line prompt without menus or colors")
+    tools = sub.add_parser("tools", help="list the tools a workspace image provides")
+    tools.add_argument("name")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     bench = Workbench()
+    store = ProfileStore()
     try:
         if args.action == "tour":
             if args.run:
@@ -94,12 +171,16 @@ def main(argv: list[str] | None = None) -> int:
                 bench.pull(args.profile)
                 print(f"Updated {IMAGES[args.profile]}")
         elif args.action == "open":
+            vpn, vpn_profile = vpn_config(args, store)
             bench.open(args.name, Path.cwd() if args.cwd else args.workspace,
-                       profile=args.image, vpn=args.vpn)
+                       profile=args.image, vpn=vpn, vpn_profile=vpn_profile)
         elif args.action == "create":
+            vpn, vpn_profile = vpn_config(args, store)
             folder = bench.create(args.name, Path.cwd() if args.cwd else args.workspace,
-                                  profile=args.image or "web", vpn=args.vpn)
+                                  profile=args.image or "web", vpn=vpn, vpn_profile=vpn_profile)
             print(f"Created {args.name} -> {folder}")
+            if vpn_profile:
+                print(f"VPN profile: {vpn_profile}")
             print(f"Enter with: rangedock enter {args.name}")
         elif args.action == "enter":
             bench.enter(args.name)
@@ -109,8 +190,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{bench.restart(args.name)} {args.name}")
         elif args.action == "info":
             details = bench.info(args.name)
-            for key in ("name", "status", "image", "profile", "workspace", "vpn", "created"):
-                print(f"{key.capitalize():<10} {details[key]}")
+            for label, key in [("Name", "name"), ("Status", "status"), ("Image", "image"),
+                               ("Profile", "profile"), ("Workspace", "workspace"), ("VPN", "vpn"),
+                               ("VPN profile", "vpn_profile"), ("Created", "created")]:
+                print(f"{label:<12} {details[key]}")
         elif args.action == "run":
             command = args.command[1:] if args.command[:1] == ["--"] else args.command
             bench.run(args.name, command)
@@ -131,14 +214,39 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_browser:
                 webbrowser.open(url)
         elif args.action == "vpn":
-            if args.vpn_action == "status":
+            if args.vpn_action == "profile":
+                if args.profile_action == "add":
+                    profile = store.add(args.profile_name, args.config, args.vpn_type)
+                    print(f"Saved VPN profile '{profile.name}'.")
+                elif args.profile_action == "list":
+                    show_profiles(store)
+                elif args.profile_action == "show":
+                    show_profile(store, args.profile_name)
+                elif args.profile_action == "remove":
+                    profile = store.remove(args.profile_name)
+                    print(f"Removed VPN profile '{profile.name}'. Files were not changed: {profile.config_dir}")
+            elif args.vpn_action == "status":
                 print(bench.vpn_status(args.name))
             elif args.vpn_action == "connect":
+                if args.vpn_profile:
+                    require_profile(bench, store, args.name, args.vpn_profile)
                 print(bench.vpn_connect(args.name))
             elif args.vpn_action == "disconnect":
                 print(bench.vpn_disconnect(args.name))
             elif args.vpn_action == "logs":
                 print(bench.vpn_logs(args.name))
+        elif args.action == "console":
+            name = last_workspace() if args.last else args.name
+            bench.info(name)
+            if args.vpn_profile:
+                require_profile(bench, store, name, args.vpn_profile)
+                print(bench.vpn_connect(name))
+            open_console(bench, name, tree=command_tree(build_parser()), dispatch=main, plain=args.plain)
+        elif args.action == "tools":
+            catalog = workspace_tools(bench, args.name)
+            print(f"Source: {catalog.source}")
+            for tool in sorted(catalog.tools, key=lambda item: (item.category, item.name)):
+                print(f"{tool.name:<14} {tool.category:<12} {tool.description}")
         elif args.action == "stop":
             print(f"{'Stopped' if bench.stop(args.name) else 'Already stopped'} {args.name}")
         elif args.action == "remove":
