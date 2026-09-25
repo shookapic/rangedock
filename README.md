@@ -51,7 +51,7 @@ Upgrading from an earlier version: existing containers remain usable on their or
 ## First workspace
 
 Run `rangedock tour` for a read-only command walkthrough. Run `rangedock tour --run` to try it with a small `base` workspace. The hands-on tour creates `~/rangedock-workspaces/tour/rangedock-tour.txt`, demonstrates that the file survives a container restart, and leaves the practice container stopped. `rangedock remove tour` removes that container while keeping the host files. Use `--name` or `--workspace` to choose another practice location. The base image may download on first use.
-The v0.4.0 CLI uses the v0.4.0 images, which carry the tool manifest for console completion.
+The v0.4.1 CLI uses the v0.4.0 images, which carry the tool manifest for console completion.
 
 ```bash
 rangedock open lab
@@ -115,7 +115,7 @@ rangedock console htb-box --profile htb
 rangedock console --last
 ```
 
-The console is a prompt for one existing workspace. It starts the workspace if needed but never creates one. Commands run inside the workspace with its usual user, mounts, and capabilities, and each shows its exit code and duration. `Tab` completes installed tools and their common options, workspace names, VPN profiles, and `rangedock` subcommands. `Ctrl-K` opens a command palette (workspace info, VPN status, desktop, image list, and more), `Ctrl-R` searches history, `Ctrl-C` stops the running command, and `Ctrl-D` leaves the console while the workspace keeps running. The header shows the workspace image and whether its VPN is `connected`, `connecting`, or `stopped`.
+The console is a prompt for one existing workspace. It starts the workspace if needed but never creates one. Commands run inside the workspace with its usual user, mounts, and capabilities, and each shows its exit code and duration. Suggestions appear as you type, and `Tab` completes installed tools and their common options, workspace names, VPN profiles, `rangedock` subcommands, and paths inside the workspace (after `cd`, or once a word contains `/` or starts with `~` or `.`). After a wordlist flag such as `gobuster -w`, `ffuf -w`, or `hydra -P`/`-L`, the console suggests common SecLists files and the `/usr/share/seclists/` and `/usr/share/wordlists/` folders. Grey text suggests a command from history; press `→` to accept it. `Ctrl-K` opens a command palette (workspace info, VPN status, desktop, image list, and more), `Ctrl-R` searches history, `Ctrl-C` stops the running command, and `Ctrl-D` leaves the console while the workspace keeps running. The header shows the workspace image and whether its VPN is `connected`, `connecting`, or `stopped`.
 
 Inside the console, `cd PATH` sets the directory for later commands, `tool NAME` prints a tool's options from the manifest without running anything, `help TOOL` runs a tool's `--help` and adds its options to completion, `help` lists console commands, and `rangedock ...` runs RangeDock commands. Commands without shell syntax run as an argument vector; pipes, redirects, and variables go to the workspace's Bash. Nothing is sent to a network service.
 
