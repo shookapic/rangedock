@@ -1,0 +1,204 @@
+{
+  "schema": 1,
+  "tools": [
+    {
+      "name": "nmap",
+      "category": "recon",
+      "description": "Network exploration and port scanner",
+      "aliases": [],
+      "options": [
+        {"flag": "-sT", "description": "TCP connect scan (works without raw sockets)"},
+        {"flag": "-sV", "description": "Probe open ports for service versions"},
+        {"flag": "-sC", "description": "Run default NSE scripts"},
+        {"flag": "-p", "description": "Ports to scan, e.g. -p 22,80 or -p-"},
+        {"flag": "-p-", "description": "Scan all 65535 TCP ports"},
+        {"flag": "-Pn", "description": "Skip host discovery"},
+        {"flag": "-A", "description": "OS detection, versions, scripts, traceroute"},
+        {"flag": "-T4", "description": "Faster timing template"},
+        {"flag": "-oA", "description": "Write normal, XML, and grepable output"},
+        {"flag": "-oN", "description": "Write normal output to a file"},
+        {"flag": "--open", "description": "Only show open ports"},
+        {"flag": "--script", "description": "Run the named NSE scripts"},
+        {"flag": "--top-ports", "description": "Scan the most common ports"}
+      ]
+    },
+    {
+      "name": "curl",
+      "category": "web",
+      "description": "Transfer data with URLs",
+      "aliases": [],
+      "options": [
+        {"flag": "-i", "description": "Include response headers"},
+        {"flag": "-I", "description": "Fetch headers only"},
+        {"flag": "-k", "description": "Allow insecure TLS"},
+        {"flag": "-L", "description": "Follow redirects"},
+        {"flag": "-s", "description": "Silent mode"},
+        {"flag": "-v", "description": "Verbose output"},
+        {"flag": "-X", "description": "Request method"},
+        {"flag": "-H", "description": "Add a request header"},
+        {"flag": "-d", "description": "Send request body data"},
+        {"flag": "-o", "description": "Write output to a file"},
+        {"flag": "-x", "description": "Use a proxy"}
+      ]
+    },
+    {"name": "wget", "category": "web", "description": "Download files over HTTP, HTTPS, and FTP", "aliases": [], "options": []},
+    {
+      "name": "dig",
+      "category": "dns",
+      "description": "DNS lookup utility",
+      "aliases": [],
+      "options": [
+        {"flag": "+short", "description": "Terse answer"},
+        {"flag": "axfr", "description": "Request a zone transfer"},
+        {"flag": "-x", "description": "Reverse lookup"}
+      ]
+    },
+    {"name": "host", "category": "dns", "description": "Simple DNS lookup utility", "aliases": [], "options": []},
+    {"name": "whois", "category": "dns", "description": "Query domain and IP registration records", "aliases": [], "options": []},
+    {
+      "name": "nc",
+      "category": "network",
+      "description": "Netcat: read and write TCP/UDP connections",
+      "aliases": ["netcat"],
+      "options": [
+        {"flag": "-l", "description": "Listen for an incoming connection"},
+        {"flag": "-v", "description": "Verbose output"},
+        {"flag": "-n", "description": "Numeric addresses only, no DNS"},
+        {"flag": "-z", "description": "Scan without sending data"},
+        {"flag": "-u", "description": "Use UDP"}
+      ]
+    },
+    {"name": "ping", "category": "network", "description": "Send ICMP echo requests", "aliases": [], "options": []},
+    {"name": "ip", "category": "network", "description": "Show and change routing, devices, and tunnels", "aliases": [], "options": []},
+    {"name": "ssh", "category": "network", "description": "OpenSSH remote login client", "aliases": [], "options": []},
+    {"name": "socat", "category": "network", "description": "Multipurpose socket relay", "aliases": [], "options": []},
+    {"name": "tcpdump", "category": "network", "description": "Capture and inspect packets (needs extra capabilities)", "aliases": [], "options": []},
+    {"name": "proxychains4", "category": "network", "description": "Route a command through proxies", "aliases": ["proxychains"], "options": []},
+    {
+      "name": "ffuf",
+      "category": "web",
+      "description": "Fast web fuzzer",
+      "aliases": [],
+      "options": [
+        {"flag": "-u", "description": "Target URL containing FUZZ"},
+        {"flag": "-w", "description": "Wordlist path"},
+        {"flag": "-mc", "description": "Match HTTP status codes"},
+        {"flag": "-fc", "description": "Filter HTTP status codes"},
+        {"flag": "-fs", "description": "Filter response size"},
+        {"flag": "-H", "description": "Add a request header"},
+        {"flag": "-e", "description": "File extensions to append"},
+        {"flag": "-recursion", "description": "Scan discovered directories"},
+        {"flag": "-o", "description": "Write results to a file"}
+      ]
+    },
+    {
+      "name": "gobuster",
+      "category": "web",
+      "description": "Directory, DNS, and virtual host brute forcing",
+      "aliases": [],
+      "options": [
+        {"flag": "dir", "description": "Directory and file mode"},
+        {"flag": "dns", "description": "DNS subdomain mode"},
+        {"flag": "vhost", "description": "Virtual host mode"},
+        {"flag": "-u", "description": "Target URL"},
+        {"flag": "-w", "description": "Wordlist path"},
+        {"flag": "-x", "description": "File extensions to search for"},
+        {"flag": "-t", "description": "Number of concurrent threads"},
+        {"flag": "-k", "description": "Skip TLS verification"}
+      ]
+    },
+    {
+      "name": "feroxbuster",
+      "category": "web",
+      "description": "Recursive content discovery",
+      "aliases": [],
+      "options": [
+        {"flag": "-u", "description": "Target URL"},
+        {"flag": "-w", "description": "Wordlist path"},
+        {"flag": "-x", "description": "File extensions to search for"},
+        {"flag": "-k", "description": "Skip TLS verification"},
+        {"flag": "--depth", "description": "Maximum recursion depth"}
+      ]
+    },
+    {"name": "dirb", "category": "web", "description": "Web content scanner", "aliases": [], "options": []},
+    {
+      "name": "nikto",
+      "category": "web",
+      "description": "Web server scanner",
+      "aliases": [],
+      "options": [
+        {"flag": "-h", "description": "Target host or URL"},
+        {"flag": "-p", "description": "Target port"},
+        {"flag": "-ssl", "description": "Force TLS"},
+        {"flag": "-o", "description": "Write results to a file"}
+      ]
+    },
+    {"name": "whatweb", "category": "web", "description": "Identify web technologies", "aliases": [], "options": []},
+    {
+      "name": "wfuzz",
+      "category": "web",
+      "description": "Web application fuzzer",
+      "aliases": [],
+      "options": [
+        {"flag": "-w", "description": "Wordlist path"},
+        {"flag": "-u", "description": "Target URL containing FUZZ"},
+        {"flag": "--hc", "description": "Hide responses with these status codes"},
+        {"flag": "--hh", "description": "Hide responses with this many characters"}
+      ]
+    },
+    {
+      "name": "sqlmap",
+      "category": "web",
+      "description": "Automatic SQL injection testing",
+      "aliases": [],
+      "options": [
+        {"flag": "-u", "description": "Target URL"},
+        {"flag": "-r", "description": "Load an HTTP request from a file"},
+        {"flag": "--data", "description": "POST body"},
+        {"flag": "--batch", "description": "Use default answers"},
+        {"flag": "--dbs", "description": "Enumerate databases"},
+        {"flag": "--tables", "description": "Enumerate tables"},
+        {"flag": "--dump", "description": "Dump table entries"},
+        {"flag": "--level", "description": "Test depth (1-5)"},
+        {"flag": "--risk", "description": "Test risk (1-3)"}
+      ]
+    },
+    {"name": "dnsrecon", "category": "dns", "description": "DNS enumeration", "aliases": [], "options": []},
+    {
+      "name": "hydra",
+      "category": "credentials",
+      "description": "Network login brute forcer",
+      "aliases": [],
+      "options": [
+        {"flag": "-l", "description": "Single login name"},
+        {"flag": "-L", "description": "Login name list"},
+        {"flag": "-p", "description": "Single password"},
+        {"flag": "-P", "description": "Password list"},
+        {"flag": "-s", "description": "Service port"},
+        {"flag": "-t", "description": "Parallel tasks"},
+        {"flag": "-f", "description": "Stop after the first valid pair"},
+        {"flag": "-V", "description": "Show each attempt"}
+      ]
+    },
+    {
+      "name": "john",
+      "category": "credentials",
+      "description": "John the Ripper password cracker",
+      "aliases": [],
+      "options": [
+        {"flag": "--wordlist=", "description": "Wordlist mode"},
+        {"flag": "--format=", "description": "Hash format"},
+        {"flag": "--rules", "description": "Enable word mangling rules"},
+        {"flag": "--show", "description": "Show cracked passwords"},
+        {"flag": "--list=formats", "description": "List supported hash formats"}
+      ]
+    },
+    {"name": "git", "category": "utility", "description": "Version control", "aliases": [], "options": []},
+    {"name": "jq", "category": "utility", "description": "Command-line JSON processor", "aliases": [], "options": []},
+    {"name": "rg", "category": "utility", "description": "Recursive text search (ripgrep)", "aliases": [], "options": []},
+    {"name": "tmux", "category": "utility", "description": "Terminal multiplexer", "aliases": [], "options": []},
+    {"name": "vi", "category": "utility", "description": "Text editor", "aliases": ["vim.tiny"], "options": []},
+    {"name": "less", "category": "utility", "description": "Page through text", "aliases": [], "options": []},
+    {"name": "python3", "category": "utility", "description": "Python interpreter", "aliases": [], "options": []}
+  ]
+}

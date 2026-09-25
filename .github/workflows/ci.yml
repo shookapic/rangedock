@@ -27,6 +27,11 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: rangedock --help
       - run: rangedock tour
+      - run: rangedock vpn profile list
+      - run: rangedock console --help
+      - run: rangedock config list
+      - run: rangedock config set console.editing vi
+      - run: rangedock config get console.editing
   image:
     runs-on: ubuntu-latest
     steps:
@@ -42,10 +47,15 @@ jobs:
       - run: |
           test -f "$RUNNER_TEMP/rangedock-tour-smoke/rangedock-tour.txt"
           test "$(docker inspect rangedock-tutorial-smoke --format '{{.State.Running}}')" = false
-      - run: docker run --rm rangedock:0.3.0-desktop sh -c '! command -v burpsuite'
+      - run: docker run --rm rangedock:0.4.0-desktop sh -c '! command -v burpsuite'
       - run: printf 'exit\n' | rangedock open smoke --workspace "$RUNNER_TEMP/rangedock-smoke"
       - run: rangedock info smoke
       - run: rangedock run smoke -- nmap --version
+      - run: rangedock tools smoke | grep -q 'image manifest'
+      - run: rangedock tools smoke --tool nmap | grep -q 'Common options'
+      - run: rangedock bench smoke --runs 3
+      - run: printf 'nmap --version\ntool nmap\ncd /tmp\npwd > /workspace/console-cwd.txt\nexit\n' | rangedock console smoke
+      - run: test "$(cat "$RUNNER_TEMP/rangedock-smoke/console-cwd.txt")" = /tmp
       - run: rangedock run smoke -- sh -c 'command -v john && command -v hydra && command -v sqlmap && command -v ffuf && test -f /usr/share/wordlists/rockyou.txt.gz && test -f /usr/share/seclists/Discovery/Web-Content/common.txt'
       - run: rangedock create desktop-smoke --image desktop --workspace "$RUNNER_TEMP/rangedock-desktop-smoke"
       - run: rangedock desktop desktop-smoke --no-browser

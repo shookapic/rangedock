@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+"""Record which catalogued tools are installed in this image (run during image builds)."""
+
+import json
+import shutil
+import sys
+from pathlib import Path
+
+CATALOG = Path("/usr/lib/rangedock/catalog.json")
+MANIFEST = Path("/usr/share/rangedock/tools.json")
+
+
+def main(image: str) -> None:
+    catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+    tools = []
+    for tool in catalog["tools"]:
+        if shutil.which(tool["name"]):
+            aliases = [alias for alias in tool["aliases"] if shutil.which(alias)]
+            tools.append({**tool, "aliases": aliases})
+    MANIFEST.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {"schema": catalog["schema"], "image": image, "tools": tools}
+    MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    print(f"Tool manifest for {image}: {len(tools)} tools")
+
+
+if __name__ == "__main__":
+    main(sys.argv[1])

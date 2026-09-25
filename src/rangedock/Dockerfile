@@ -14,6 +14,9 @@ RUN apt-get update \
     && useradd --create-home --uid 1000 --shell /bin/bash analyst \
     && mkdir -p /workspace \
     && chown analyst:analyst /workspace
+COPY tools.json /usr/lib/rangedock/catalog.json
+COPY tools-manifest /usr/lib/rangedock/tools-manifest
+RUN python3 /usr/lib/rangedock/tools-manifest base
 
 USER analyst
 ENV HOME=/home/analyst
@@ -28,6 +31,7 @@ RUN apt-get update \
        feroxbuster dnsrecon tcpdump socat proxychains4 \
        seclists wordlists \
     && rm -rf /var/lib/apt/lists/*
+RUN python3 /usr/lib/rangedock/tools-manifest web
 USER analyst
 
 FROM web AS desktop
@@ -37,7 +41,8 @@ RUN apt-get update \
        novnc websockify openbox x11vnc xterm xvfb \
     && rm -rf /var/lib/apt/lists/*
 COPY desktop-start /usr/local/bin/rangedock-desktop-start
-RUN chmod 755 /usr/local/bin/rangedock-desktop-start
+RUN chmod 755 /usr/local/bin/rangedock-desktop-start \
+    && python3 /usr/lib/rangedock/tools-manifest desktop
 USER analyst
 EXPOSE 6080
 CMD ["rangedock-desktop-start"]
