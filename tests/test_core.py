@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rangedock.core import LABEL, IMAGE, RangeDockError, Workbench, valid_name
+from rangedock.core import LABEL, IMAGE, WORKSPACE_LABEL, RangeDockError, Workbench, valid_name
 
 
 class FakeDocker:
@@ -12,24 +12,43 @@ class FakeDocker:
         self.exists = False
         self.running = False
         self.managed = True
+        self.workspace = ""
+        self.platform = "linux"
 
     def call(self, args, *, input_text=None, interactive=False):
         self.calls.append((args, input_text, interactive))
         if args[0] == "version":
             return "29.0"
+        if args[0] == "info":
+            return self.platform
         if args[:2] == ["image", "inspect"]:
             return "sha256:example"
         if args[:2] == ["container", "create"]:
             self.exists = True
+            self.workspace = next(
+                value.removeprefix(f"{WORKSPACE_LABEL}=") for value in args
+                if value.startswith(f"{WORKSPACE_LABEL}=")
+            )
             return "container-id"
         if args[:2] == ["container", "inspect"]:
             if not self.exists:
                 raise RangeDockError("No such container")
             return json.dumps({
-                "Config": {"Labels": {LABEL: "true" if self.managed else "false"}},
-                "State": {"Running": self.running},
+                "Config": {
+                    "Labels": {LABEL: "true" if self.managed else "false", WORKSPACE_LABEL: self.workspace},
+                    "Image": IMAGE,
+                },
+                "State": {"Running": self.running, "Status": "running" if self.running else "exited"},
+                "Created": "2026-09-25T00:00:00Z",
             })
+        if args[:2] == ["container", "ls"]:
+            if "--format" in args and args[-1] == "{{.Names}}":
+                return "rangedock-lab" if self.exists else ""
+            return json.dumps({"Names": "rangedock-lab", "Status": "Up", "Image": IMAGE})
         if args[:2] == ["container", "start"]:
+            self.running = True
+            return ""
+        if args[:2] == ["container", "restart"]:
             self.running = True
             return ""
         if args[:2] == ["container", "stop"]:
@@ -38,8 +57,6 @@ class FakeDocker:
         if args[:2] == ["container", "rm"]:
             self.exists = False
             return ""
-        if args[:2] == ["container", "ls"]:
-            return json.dumps({"Names": "rangedock-lab", "Status": "Up", "Image": IMAGE})
         return ""
 
 
@@ -71,7 +88,10 @@ class WorkbenchTests(unittest.TestCase):
         fake.managed = False
         with self.assertRaisesRegex(RangeDockError, "not managed"):
             Workbench(fake).stop("lab")
+        with self.assertRaisesRegex(RangeDockError, "not managed"):
+            Workbench(fake).open("lab")
         self.assertFalse(any(args[:2] == ["container", "stop"] for args, _, _ in fake.calls))
+        self.assertFalse(any(args[:2] == ["container", "exec"] for args, _, _ in fake.calls))
 
     def test_run_starts_workspace_and_preserves_argv(self):
         fake = FakeDocker()
@@ -80,6 +100,33 @@ class WorkbenchTests(unittest.TestCase):
         bench.run("lab", ["nmap", "--version"])
         self.assertIn((["container", "start", "rangedock-lab"], None, False), fake.calls)
         self.assertIn((["container", "exec", "rangedock-lab", "nmap", "--version"], None, True), fake.calls)
+
+    def test_open_reuses_workspace_and_rejects_a_different_mount(self):
+        fake = FakeDocker()
+        bench = Workbench(fake)
+        with tempfile.TemporaryDirectory() as folder:
+            workspace = Path(folder) / "lab"
+            bench.open("lab", workspace)
+            bench.open("lab", workspace)
+            self.assertEqual(sum(args[:2] == ["container", "create"] for args, _, _ in fake.calls), 1)
+            self.assertEqual(sum(args[:2] == ["container", "exec"] for args, _, _ in fake.calls), 2)
+            with self.assertRaisesRegex(RangeDockError, "already uses"):
+                bench.open("lab", Path(folder) / "other")
+            self.assertEqual(bench.info("lab")["workspace"], str(workspace.resolve()))
+
+    def test_restart_starts_stopped_or_restarts_running(self):
+        fake = FakeDocker()
+        fake.exists = True
+        bench = Workbench(fake)
+        self.assertEqual(bench.restart("lab"), "Started")
+        self.assertEqual(bench.restart("lab"), "Restarted")
+        self.assertIn((["container", "restart", "rangedock-lab"], None, False), fake.calls)
+
+    def test_doctor_rejects_windows_container_mode(self):
+        fake = FakeDocker()
+        fake.platform = "windows"
+        with self.assertRaisesRegex(RangeDockError, "Linux containers"):
+            Workbench(fake).linux_daemon()
 
     def test_build_uses_bundled_image_without_external_code(self):
         fake = FakeDocker()

@@ -10,7 +10,7 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-IMAGE = "rangedock:0.1.0"
+IMAGE = "rangedock:0.2.0"
 LABEL = "dev.rangedock.managed"
 WORKSPACE_LABEL = "dev.rangedock.workspace"
 NAME_RE = re.compile(r"[a-z][a-z0-9-]{0,39}\Z")
@@ -26,7 +26,7 @@ class Docker:
         command = ["docker", *args]
         try:
             result = subprocess.run(
-                command, input=input_text, text=True, check=False,
+                command, input=input_text, text=True, encoding="utf-8", check=False,
                 stdout=None if interactive else subprocess.PIPE,
                 stderr=None if interactive else subprocess.PIPE,
             )
@@ -66,6 +66,15 @@ class Workbench:
         except RangeDockError as exc:
             raise RangeDockError(f"Docker daemon is unavailable. Start Docker, then retry. ({exc})") from exc
 
+    def linux_daemon(self) -> str:
+        version = self.daemon()
+        platform = self.docker.call(["info", "--format", "{{.OSType}}"])
+        if platform == "windows":
+            raise RangeDockError("Docker is running Windows containers. Switch Docker Desktop to Linux containers.")
+        if platform != "linux":
+            raise RangeDockError(f"Docker reported unsupported container OS: {platform or 'unknown'}.")
+        return version
+
     def image_exists(self) -> bool:
         try:
             self.docker.call(["image", "inspect", IMAGE, "--format", "{{.Id}}"])
@@ -74,7 +83,7 @@ class Workbench:
             return False
 
     def build(self) -> None:
-        self.daemon()
+        self.linux_daemon()
         dockerfile = resources.files("rangedock").joinpath("Dockerfile").read_text(encoding="utf-8")
         self.docker.call(["build", "--pull", "-t", IMAGE, "-"], input_text=dockerfile,
                          interactive=True)
@@ -84,16 +93,29 @@ class Workbench:
         try:
             payload = self.docker.call(["container", "inspect", container, "--format", "{{json .}}"])
             details = json.loads(payload)
-        except (RangeDockError, ValueError) as exc:
-            raise RangeDockError(f"Workspace '{name}' does not exist or Docker is unavailable.") from exc
+        except RangeDockError as exc:
+            if "No such container" in str(exc) or "No such object" in str(exc):
+                raise RangeDockError(f"Workspace '{name}' does not exist. Open it with 'rangedock open {name}'.") from exc
+            raise RangeDockError(f"Cannot inspect workspace '{name}': {exc}") from exc
+        except ValueError as exc:
+            raise RangeDockError(f"Docker returned invalid details for workspace '{name}'.") from exc
         labels = details.get("Config", {}).get("Labels") or {}
         if labels.get(LABEL) != "true":
             raise RangeDockError(f"Container '{container}' is not managed by RangeDock.")
         return container, details
 
+    def container_exists(self, name: str) -> bool:
+        container = container_name(name)
+        output = self.docker.call([
+            "container", "ls", "-a", "--filter", f"name=^/{container}$", "--format", "{{.Names}}"
+        ])
+        return container in output.splitlines()
+
     def create(self, name: str, workspace: Path | None = None) -> Path:
         container = container_name(name)
-        self.daemon()
+        self.linux_daemon()
+        if self.container_exists(name):
+            raise RangeDockError(f"Container '{container}' already exists. Use 'rangedock open {name}' or another name.")
         if not self.image_exists():
             raise RangeDockError(f"Image {IMAGE} is missing. Run 'rangedock build' first.")
         folder = (workspace or Path.home() / "rangedock-workspaces" / name).expanduser().resolve()
@@ -115,12 +137,43 @@ class Workbench:
         ])
         return folder
 
+    def open(self, name: str, workspace: Path | None = None) -> None:
+        if self.container_exists(name):
+            existing = self.info(name)
+            if workspace is not None and workspace.expanduser().resolve() != Path(existing["workspace"]):
+                raise RangeDockError(
+                    f"Workspace '{name}' already uses {existing['workspace']}. Choose another name or omit --workspace."
+                )
+        else:
+            self.create(name, workspace)
+        self.enter(name)
+
+    def info(self, name: str) -> dict[str, str]:
+        _, details = self._managed(name)
+        labels = details.get("Config", {}).get("Labels") or {}
+        state = details.get("State", {})
+        return {
+            "name": name,
+            "status": state.get("Status") or ("running" if state.get("Running") else "stopped"),
+            "image": details.get("Config", {}).get("Image", "unknown"),
+            "workspace": labels.get(WORKSPACE_LABEL, "unknown"),
+            "created": details.get("Created", "unknown"),
+        }
+
     def start(self, name: str) -> bool:
         container, details = self._managed(name)
         if details.get("State", {}).get("Running"):
             return False
         self.docker.call(["container", "start", container])
         return True
+
+    def restart(self, name: str) -> str:
+        container, details = self._managed(name)
+        if details.get("State", {}).get("Running"):
+            self.docker.call(["container", "restart", container])
+            return "Restarted"
+        self.docker.call(["container", "start", container])
+        return "Started"
 
     def enter(self, name: str) -> None:
         self.start(name)

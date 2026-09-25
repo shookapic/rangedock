@@ -9,6 +9,12 @@ from pathlib import Path
 from .core import IMAGE, RangeDockError, Workbench
 
 
+def workspace_options(command: argparse.ArgumentParser) -> None:
+    source = command.add_mutually_exclusive_group()
+    source.add_argument("--workspace", type=Path, help="host folder to mount at /workspace")
+    source.add_argument("--cwd", action="store_true", help="mount the current folder at /workspace")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="rangedock", description="Named Docker workspaces for security labs."
@@ -16,12 +22,17 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="action", required=True)
     sub.add_parser("doctor", help="check Docker and the local image")
     sub.add_parser("build", help="build the bundled tools image locally")
+    open_command = sub.add_parser("open", help="create if needed, then enter a workspace")
+    open_command.add_argument("name")
+    workspace_options(open_command)
     create = sub.add_parser("create", help="create a named persistent workspace")
     create.add_argument("name")
-    create.add_argument("--workspace", type=Path, help="host folder to mount at /workspace")
+    workspace_options(create)
     for action, help_text in [
         ("enter", "open a shell, starting the workspace if needed"),
         ("start", "start a workspace without entering it"),
+        ("restart", "restart a running workspace, or start a stopped one"),
+        ("info", "show workspace status, image, and host folder"),
         ("stop", "stop a workspace"),
         ("remove", "remove a stopped container; keep its files"),
     ]:
@@ -35,27 +46,35 @@ def main(argv: list[str] | None = None) -> int:
     bench = Workbench()
     try:
         if args.action == "doctor":
-            version = bench.daemon()
-            print(f"Docker daemon: {version}")
+            version = bench.linux_daemon()
+            print(f"Docker daemon: {version} (Linux containers)")
             print(f"Local image: {IMAGE} {'ready' if bench.image_exists() else 'missing (run rangedock build)'}")
         elif args.action == "build":
             bench.build()
             print(f"Built {IMAGE}")
+        elif args.action == "open":
+            bench.open(args.name, Path.cwd() if args.cwd else args.workspace)
         elif args.action == "create":
-            folder = bench.create(args.name, args.workspace)
+            folder = bench.create(args.name, Path.cwd() if args.cwd else args.workspace)
             print(f"Created {args.name} -> {folder}")
             print(f"Enter with: rangedock enter {args.name}")
         elif args.action == "enter":
             bench.enter(args.name)
         elif args.action == "start":
             print(f"{'Started' if bench.start(args.name) else 'Already running'} {args.name}")
+        elif args.action == "restart":
+            print(f"{bench.restart(args.name)} {args.name}")
+        elif args.action == "info":
+            details = bench.info(args.name)
+            for key in ("name", "status", "image", "workspace", "created"):
+                print(f"{key.capitalize():<10} {details[key]}")
         elif args.action == "run":
             command = args.command[1:] if args.command[:1] == ["--"] else args.command
             bench.run(args.name, command)
         elif args.action == "list":
             rows = bench.list()
             if not rows:
-                print("No workspaces yet. Run 'rangedock create NAME'.")
+                print("No workspaces yet. Run 'rangedock open NAME'.")
             for row in rows:
                 print(f"{row.get('Names', '?'):<28} {row.get('Status', '?'):<22} {row.get('Image', '?')}")
         elif args.action == "stop":
