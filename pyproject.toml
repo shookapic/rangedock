@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rangedock"
-version = "0.2.1"
+version = "0.3.0"
 description = "CLI-managed Docker workspaces for security labs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -29,4 +29,4 @@ Issues = "https://github.com/shookapic/rangedock/issues"
 where = ["src"]
 
 [tool.setuptools.package-data]
-rangedock = ["Dockerfile"]
+rangedock = ["Dockerfile", "desktop-start"]

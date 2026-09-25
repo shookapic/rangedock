@@ -1,0 +1,26 @@
+#!/bin/sh
+set -eu
+
+export DISPLAY=:1
+rm -f /tmp/.X1-lock /tmp/.X11-unix/X1
+Xvfb :1 -screen 0 1440x900x24 -nolisten tcp >/tmp/rangedock-xvfb.log 2>&1 &
+XVFB_PID=$!
+sleep 1
+if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+    cat /tmp/rangedock-xvfb.log >&2
+    exit 1
+fi
+openbox >/tmp/rangedock-openbox.log 2>&1 &
+xterm >/tmp/rangedock-xterm.log 2>&1 &
+x11vnc -display :1 -forever -shared -nopw -localhost -quiet >/tmp/rangedock-vnc.log 2>&1 &
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if nc -z 127.0.0.1 5900 2>/dev/null; then
+        break
+    fi
+    sleep 0.2
+done
+if ! nc -z 127.0.0.1 5900 2>/dev/null; then
+    cat /tmp/rangedock-vnc.log >&2
+    exit 1
+fi
+exec websockify --web /usr/share/novnc 0.0.0.0:6080 localhost:5900

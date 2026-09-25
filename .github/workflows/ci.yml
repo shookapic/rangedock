@@ -34,14 +34,31 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install -e .
-      - run: rangedock build
+      - run: rangedock build desktop
+      - run: rangedock build web
+      - run: rangedock build base
+      - run: docker run --rm rangedock:0.3.0-desktop sh -c '! command -v burpsuite'
       - run: printf 'exit\n' | rangedock open smoke --workspace "$RUNNER_TEMP/rangedock-smoke"
       - run: rangedock info smoke
       - run: rangedock run smoke -- nmap --version
       - run: rangedock run smoke -- sh -c 'command -v john && command -v hydra && command -v sqlmap && command -v ffuf && test -f /usr/share/wordlists/rockyou.txt.gz && test -f /usr/share/seclists/Discovery/Web-Content/common.txt'
+      - run: rangedock create desktop-smoke --image desktop --workspace "$RUNNER_TEMP/rangedock-desktop-smoke"
+      - run: rangedock desktop desktop-smoke --no-browser
+      - run: |
+          PORT=$(docker inspect rangedock-desktop-smoke --format '{{(index (index .NetworkSettings.Ports "6080/tcp") 0).HostPort}}')
+          curl --fail "http://127.0.0.1:$PORT/vnc.html" >/dev/null
+          docker exec rangedock-desktop-smoke nc -z 127.0.0.1 5900
+      - run: rangedock restart desktop-smoke
+      - run: rangedock desktop desktop-smoke --no-browser
+      - run: |
+          PORT=$(docker inspect rangedock-desktop-smoke --format '{{(index (index .NetworkSettings.Ports "6080/tcp") 0).HostPort}}')
+          curl --fail "http://127.0.0.1:$PORT/vnc.html" >/dev/null
+          docker exec rangedock-desktop-smoke nc -z 127.0.0.1 5900
       - run: rangedock run smoke -- sh -c 'echo persisted > /workspace/proof.txt'
       - run: test "$(cat "$RUNNER_TEMP/rangedock-smoke/proof.txt")" = persisted
       - run: rangedock restart smoke
       - run: rangedock stop smoke
       - run: rangedock remove smoke
+      - run: rangedock stop desktop-smoke
+      - run: rangedock remove desktop-smoke
       - run: test -f "$RUNNER_TEMP/rangedock-smoke/proof.txt"
