@@ -28,7 +28,9 @@ SHELL_CHARS = frozenset("|&;<>()$`*?[]{}~!#")
 CHAINING_CHARS = frozenset("|&;<>()`")
 ASSIGNMENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*=")
 DEFAULT_CWD = "/workspace"
-KEY_HINTS = "Tab complete · Ctrl-P history · Ctrl-R search · Ctrl-K palette · Ctrl-D exit"
+# Lists one directory for path completion; '~' expands like in the shell, errors list nothing.
+LIST_SCRIPT = 'd=$1; case $d in "~"*) d=$HOME${d#"~"};; esac; ls -1Ap -- "${d:-.}" 2>/dev/null || true'
+KEY_HINTS ="Tab complete · Ctrl-P history · Ctrl-R search · Ctrl-K palette · Ctrl-D exit"
 PALETTE = (
     PaletteAction("Workspace info", "rangedock info {name}"),
     PaletteAction("VPN status", "rangedock vpn status {name}"),
@@ -41,7 +43,14 @@ PALETTE = (
     PaletteAction("Exit console", "exit"),
 )
 
+BUILTINS = frozenset({"cd", "help", "tool", "exit", "quit", "rangedock"})
+
 Dispatch = Callable[[list[str]], int]
+Echo = Callable[[str, str], None]
+
+
+def plain_echo(text: str, style: str = "") -> None:
+    print(text, file=sys.stderr if style == "error" else sys.stdout)
 
 
 @dataclass(frozen=True)
@@ -107,10 +116,13 @@ class ConsoleSession:
         self.dispatch = dispatch
         self.profiles = profiles or ProfileStore()
         self.preferences = preferences or Preferences()
-        self.sources = CompletionSources()
+        self.sources = CompletionSources(list_dir=self.list_dir)
         self.engine = CompletionEngine(tree, self.sources)
+        self.listings: dict[tuple[str, str], list[str]] = {}
         self.cwd = DEFAULT_CWD
         self.header = f"RangeDock · {self.name}"
+        self.segments: list[tuple[str, str]] = []
+        self.echo: Echo = plain_echo
 
     def palette(self) -> list[PaletteAction]:
         return [PaletteAction(action.title, action.command.format(name=self.name)) for action in PALETTE]
@@ -118,11 +130,11 @@ class ConsoleSession:
     def refresh(self) -> None:
         """Reload workspace state and the names used by completion."""
         details = self.bench.info(self.name)
-        parts = ["RangeDock", self.name, details["profile"], details["status"]]
+        self.segments = [("profile", details["profile"]), ("status", details["status"])]
         if details["vpn"] != "none":
             label = "VPN" if details["vpn_profile"] == "none" else f"VPN {details['vpn_profile']}"
-            parts.append(f"{label} {self.bench.vpn_state(self.name).replace('workspace ', '')}")
-        self.header = " · ".join(parts)
+            self.segments.append(("vpn", f"{label} {self.bench.vpn_state(self.name).replace('workspace ', '')}"))
+        self.header = " · ".join(["RangeDock", self.name, *(text for _, text in self.segments)])
         self.sources.workspaces = sorted(row.get("Names", "").removeprefix("rangedock-")
                                          for row in self.bench.list())
         try:
@@ -136,8 +148,20 @@ class ConsoleSession:
         self.refresh()
         write_private_text(last_workspace_path(), f"{self.name}\n")
 
+    def list_dir(self, directory: str) -> list[str]:
+        """Directory entries for path completion, cached until the next command runs."""
+        key = (self.cwd, directory)
+        if key not in self.listings:
+            try:
+                output = self.bench.capture(self.name, ["sh", "-c", LIST_SCRIPT, "sh", directory], workdir=self.cwd)
+            except RangeDockError:
+                output = ""
+            self.listings[key] = output.splitlines()
+        return self.listings[key]
+
     def handle(self, line: str) -> bool:
         """Run one console line. Returns False when the console should close."""
+        self.listings.clear()
         command = parse_line(line)
         if command is None:
             return True
@@ -165,7 +189,7 @@ class ConsoleSession:
         started = time.monotonic()
         with forward_interrupts():
             code = self.bench.execute(self.name, argv, workdir=self.cwd)
-        print(f"[exit {code} · {time.monotonic() - started:.2f}s]")
+        self.echo(f"[exit {code} · {time.monotonic() - started:.2f}s]", "exit.fail" if code else "exit.ok")
 
     def run_rangedock(self, command: ConsoleCommand) -> None:
         if command.shell:
@@ -179,7 +203,7 @@ class ConsoleSession:
             code = exc.code if isinstance(exc.code, int) else 1
         self.refresh()
         if code:
-            print(f"[exit {code}]")
+            self.echo(f"[exit {code}]", "exit.fail")
 
     def change_directory(self, command: ConsoleCommand) -> None:
         """Resolve the target with the workspace shell so '~' and variables expand as usual."""
@@ -224,8 +248,8 @@ class ConsoleSession:
     def run(self, *, plain: bool = False) -> None:
         self.start()
         read = self._plain_reader() if plain else self._prompt_reader()
-        print(self.header)
-        print("Type 'help' for console commands. Commands run inside the workspace.")
+        self.echo(self.header, "banner")
+        self.echo("Type 'help' for console commands. Commands run inside the workspace.", "hint")
         while True:
             try:
                 line = read()
@@ -238,7 +262,7 @@ class ConsoleSession:
                 if not self.handle(line):
                     break
             except RangeDockError as exc:
-                print(f"rangedock: {exc}", file=sys.stderr)
+                self.echo(f"rangedock: {exc}", "error")
 
     def _plain_reader(self) -> Callable[[], str]:
         def read() -> str:

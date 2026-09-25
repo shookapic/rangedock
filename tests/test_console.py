@@ -12,7 +12,11 @@ from rangedock.completion import CompletionEngine, CompletionSources, command_tr
 from rangedock.console import ConsoleSession, is_private, last_workspace, parse_line
 from rangedock.core import RangeDockError, Workbench
 from rangedock.profiles import ProfileStore
-from rangedock.terminal import ConsoleHistory
+from prompt_toolkit.application import create_app_session
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+from rangedock.terminal import ConsoleHistory, ConsoleLexer, prompt_reader
 from rangedock.tools import MANIFEST_PATH, Tool, ToolCatalog, ToolOption, options_from_help, workspace_tools
 from test_core import FakeDocker
 
@@ -79,6 +83,24 @@ class CompletionTests(unittest.TestCase):
 
     def test_unknown_commands_get_no_invented_suggestions(self):
         self.assertEqual(completions(self.engine, "custom-tool --"), [])
+
+    def test_paths_complete_from_workspace_listings(self):
+        listings = {"/usr/": ["bin/", "share/", "shadow"], "": ["notes.txt", "scans/", ".cache/"]}
+        self.engine.sources.list_dir = lambda directory: listings.get(directory, [])
+        self.assertEqual(completions(self.engine, "cat /usr/sh"), ["/usr/share/", "/usr/shadow"])
+        self.assertEqual(completions(self.engine, "cd "), ["scans/"])
+        self.assertEqual(completions(self.engine, "cd ."), [".cache/"])
+        self.assertEqual(completions(self.engine, "curl http://host/"), [])
+        self.assertEqual(completions(self.engine, "nmap -s"), ["-sT", "-sV"])
+
+    def test_wordlist_flags_suggest_bundled_lists(self):
+        tools = (NMAP, Tool("gobuster", "web", "Brute forcer"), Tool("curl", "web", "HTTP client"))
+        self.engine.sources.tools = ToolCatalog(tools, "test")
+        self.engine.sources.list_dir = lambda directory: []
+        web = completions(self.engine, "gobuster dir -u http://x -w ")
+        self.assertIn("/usr/share/seclists/Discovery/Web-Content/common.txt", web)
+        self.assertIn("/usr/share/wordlists/", web)
+        self.assertEqual(completions(self.engine, "curl -w "), [])
 
     def test_palette_filters_by_title_or_command(self):
         session = ConsoleSession(Workbench(FakeDocker()), "lab", tree=command_tree(build_parser()),
@@ -205,6 +227,30 @@ class ToolManifestTests(unittest.TestCase):
     def test_options_are_extracted_from_help_text(self):
         self.assertEqual(options_from_help("Usage: tool [-v] --output=FILE, -x\nsee well-known -"),
                          ["--output=", "-v", "-x"])
+
+
+class TerminalTests(unittest.TestCase):
+    def setUp(self):
+        preferences = mock.Mock()
+        preferences.get = {"console.history": False, "console.color": True}.get
+        self.session = ConsoleSession(Workbench(FakeDocker()), "lab", tree=command_tree(build_parser()),
+                                      dispatch=lambda args: 0, preferences=preferences)
+        self.session.sources.tools = CATALOG
+
+    def type_keys(self, keys):
+        with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
+            pipe.send_text(keys)
+            return prompt_reader(self.session)()
+
+    def test_tab_fills_a_single_match_and_the_common_prefix(self):
+        self.assertEqual(self.type_keys("nm\t\r"), "nmap")
+        self.assertEqual(self.type_keys("rangedock vpn pro\t\r"), "rangedock vpn profile")
+
+    def test_lexer_marks_commands_flags_and_operators(self):
+        styles = dict((text, style) for style, text in
+                      ConsoleLexer(self.session).style_line("nmap -sV 'x' | grep open"))
+        self.assertEqual((styles["nmap"], styles["-sV"], styles["'x'"], styles["|"], styles["grep"]),
+                         ("class:cmd", "class:flag", "class:string", "class:operator", ""))
 
 
 class ConsoleStorageTests(unittest.TestCase):

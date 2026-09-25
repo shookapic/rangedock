@@ -1,15 +1,37 @@
-"""Local, deterministic completion for the lab console.
+"""Completion for the lab console.
 
-Nothing here runs a command: suggestions come from the CLI parser, Docker labels,
-the profile file, and the image tool manifest that the console loads up front.
+Suggestions come from the CLI parser, Docker labels, the profile file, and the image
+tool manifest that the console loads up front. The one exception is path completion,
+which lists workspace directories through the injected `list_dir` callable.
 """
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass, field
+from typing import Callable
 
 from .tools import ToolCatalog
+
+SECLISTS = "/usr/share/seclists/"
+WORDLISTS = {
+    "web": [SECLISTS + "Discovery/Web-Content/common.txt",
+            SECLISTS + "Discovery/Web-Content/raft-medium-directories.txt",
+            SECLISTS + "Discovery/Web-Content/DirBuster-2007_directory-list-2.3-medium.txt",
+            SECLISTS + "Discovery/DNS/subdomains-top1million-5000.txt"],
+    "passwords": [SECLISTS + "Passwords/Common-Credentials/10k-most-common.txt",
+                  SECLISTS + "Passwords/Common-Credentials/top-passwords-shortlist.txt"],
+    "usernames": [SECLISTS + "Usernames/top-usernames-shortlist.txt"],
+}
+WORDLIST_ROOTS = [SECLISTS, "/usr/share/wordlists/"]
+# Per tool, because the same letter means different things elsewhere (curl -w is a format string).
+WORDLIST_FLAGS = {
+    "gobuster": {"-w": "web", "--wordlist": "web"},
+    "ffuf": {"-w": "web"},
+    "wfuzz": {"-w": "web"},
+    "feroxbuster": {"-w": "web", "--wordlist": "web"},
+    "hydra": {"-L": "usernames", "-P": "passwords"},
+}
 
 BUILTINS = {
     "cd": "change the console working directory",
@@ -78,6 +100,7 @@ class CompletionSources:
     workspaces: list[str] = field(default_factory=list)
     profiles: list[str] = field(default_factory=list)
     learned_options: dict[str, list[str]] = field(default_factory=dict)
+    list_dir: Callable[[str], list[str]] | None = None
 
 
 class CompletionEngine:
@@ -96,6 +119,12 @@ class CompletionEngine:
             tools = self.sources.tools.commands()
             return self._match(current, {name: tool.description for name, tool in tools.items()})
         tool = self.sources.tools.find(words[0])
+        wordlist = WORDLIST_FLAGS.get(tool.name, {}).get(words[-1]) if tool else None
+        if wordlist and not current:
+            return [Suggestion(path, 0, "wordlist", path.rpartition("/")[2] or path)
+                    for path in WORDLISTS[wordlist] + WORDLIST_ROOTS]
+        if wordlist or words[0] == "cd" or ("/" in current and "://" not in current) or current.startswith(("~", ".")):
+            return self._paths(current, dirs_only=words[0] == "cd")
         if tool is None:
             return []
         options = {option.flag: option.description for option in tool.options}
@@ -149,6 +178,17 @@ class CompletionEngine:
         else:
             values = ()
         return self._match(current, dict.fromkeys(values, ""))
+
+    def _paths(self, current: str, *, dirs_only: bool) -> list[Suggestion]:
+        """Complete the last path segment; listing entries end in '/' for directories."""
+        if self.sources.list_dir is None:
+            return []
+        directory, _, prefix = current.rpartition("/")
+        directory = directory + "/" if "/" in current else ""
+        return [Suggestion(directory + entry, -len(current), display=entry)
+                for entry in self.sources.list_dir(directory)
+                if entry.startswith(prefix) and (not dirs_only or entry.endswith("/"))
+                and (prefix.startswith(".") or not entry.startswith("."))]
 
     @staticmethod
     def _match(current: str, candidates: dict[str, str]) -> list[Suggestion]:
