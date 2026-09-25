@@ -322,6 +322,14 @@ class Workbench:
         if (details.get("Config", {}).get("Labels") or {}).get(PROFILE_LABEL) != "desktop":
             raise RangeDockError(f"Workspace '{name}' does not use the desktop image.")
         self.start(name)
+        for _ in range(50):
+            try:
+                self.docker.call(["container", "exec", container, "nc", "-z", "127.0.0.1", "6080"])
+                break
+            except RangeDockError:
+                time.sleep(0.2)
+        else:
+            raise RangeDockError(f"Desktop did not become ready for '{name}'. Check 'docker logs {container}'.")
         _, details = self._managed(name)
         ports = (details.get("NetworkSettings", {}).get("Ports") or {}).get("6080/tcp") or []
         if not ports:

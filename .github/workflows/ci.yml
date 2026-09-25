@@ -49,6 +49,7 @@ jobs:
           curl --fail "http://127.0.0.1:$PORT/vnc.html" >/dev/null
           docker exec rangedock-desktop-smoke nc -z 127.0.0.1 5900
       - run: rangedock restart desktop-smoke
+      - run: rangedock desktop desktop-smoke --no-browser
       - run: |
           PORT=$(docker inspect rangedock-desktop-smoke --format '{{(index (index .NetworkSettings.Ports "6080/tcp") 0).HostPort}}')
           curl --fail "http://127.0.0.1:$PORT/vnc.html" >/dev/null
