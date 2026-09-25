@@ -15,6 +15,9 @@ RUN apt-get update \
     && mkdir -p /workspace \
     && chown analyst:analyst /workspace
 
+RUN setcap -r /usr/lib/nmap/nmap \
+    && ln -s /usr/lib/nmap/nmap /usr/local/bin/nmap
+
 USER analyst
 ENV HOME=/home/analyst
 WORKDIR /workspace
