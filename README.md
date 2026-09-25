@@ -23,6 +23,8 @@ On Linux and macOS, RangeDock uses your host user ID inside the container so fil
 
 Requires Python 3.10+ and Docker Engine or Docker Desktop running Linux containers. On Windows, start Docker Desktop and switch to Linux containers before using RangeDock. On macOS, use Docker Desktop or another Docker-compatible Linux engine.
 
+If using Lima directly on macOS, its host home mount is [read-only by default](https://lima-vm.io/docs/usage/). Start Lima with `--mount-writable` so files in `/workspace` can be written from the container.
+
 ```bash
 pipx install git+https://github.com/shookapic/rangedock.git
 rangedock doctor
