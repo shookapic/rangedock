@@ -16,30 +16,32 @@ and more. RangeDock should reach comparable **daily workflow quality** before cl
 anything like catalog or feature parity. Copying hundreds of tools into one image would
 make the first release slower and harder to maintain.
 
-## Where we are: v0.2.1
+## Where we are: v0.3.0
 
-Shipped: local image build; named workspaces; open, create, enter, start, restart,
-info, run, list, stop, remove; persistent host folders; non-root image; Linux host
-UID/GID mapping; Docker ownership labels; CI and a real Docker lifecycle test. The
-v0.2.1 image adds a curated Kali toolset and wordlists, including John, Hydra, and
-SecLists. The larger image makes a future small base plus specialized profiles more
-important.
+Shipped: named workspaces and persistent host folders; CLI lifecycle commands;
+non-root images; Linux host UID/GID mapping; Docker ownership labels; local image
+builds; published base, web, and desktop images; an opt-in localhost browser desktop;
+user-installed Burp; and opt-in OpenVPN with scoped device/capability access. The base
+image measured about 566 MB and the web image about 4.26 GB locally on the maintainer's
+Docker Desktop. These are local measurements, not compressed download sizes.
 
-Missing for everyday use: prebuilt images, update handling, reusable defaults, VPN,
-GUI, and specialized tool profiles.
+Missing for broader use: WireGuard, saved local profiles, persistent desktop settings
+across container recreation, image vulnerability gates, VPN DNS verification, and a
+supported-platform benchmark matrix.
 
 ## Release sequence
 
 | Release | Outcome | Deliverables | Exit gate |
 | --- | --- | --- | --- |
 | **v0.2: daily driver** | A new user reaches a shell quickly and understands every workspace. | `open NAME` creates/starts/enters; `--workspace .`; `info NAME`; `restart`; useful Docker diagnostics; consistent errors and help; install through pipx/uv/pip; documented Windows, Linux, and macOS setup. | Fresh user can install and open a lab in under five minutes after Docker is ready. Windows and Linux lifecycle tests pass; macOS gets a documented manual smoke test until CI is available. Removal never deletes host files. |
-| **v0.3: maintained images** | No local build needed for normal use. | Public, versioned `base` and `web` images for amd64/arm64; `image list/pull/update`; pinned tool manifest, software bill of materials, vulnerability checks, and provenance; explicit notice that existing containers keep their old image; local custom builds remain supported. | A clean machine pulls and opens an image without compiling tools. Tool versions can be reproduced from a release manifest. Image updates never silently replace a running workspace. |
+| **v0.3: images and connected desktop** | No local build needed for normal use; GUI and OpenVPN labs can be opened on demand. | Public versioned `base`, `web`, and `desktop` images for amd64/arm64; `image list/pull/update`; SBOM and provenance attestations; opt-in OpenVPN; localhost browser desktop; user-installed Burp; existing containers keep their old image. | A clean machine pulls and opens an image without compiling tools. A local OpenVPN tunnel and desktop restart work on the maintainer's Docker Desktop. Published images are anonymously pullable. |
+| **v0.3.x: image hardening** | Published image contents are auditable and updates are routine. | Pinned tool manifest, vulnerability checks, compressed size reporting, and a clean host pull test in CI. | A release can be tied to its tool versions and image digest, and critical image findings block publication. |
 | **v0.4: repeatable labs** | An operator can recreate a useful setup without Docker flag memorization. | Local profiles and user config; shared read-only resources and user customizations; optional extra mounts and loopback-only port publishing; persistent shell history; a `doctor` report that explains platform limitations. | Two machines can create the same profile and see the same tool versions and workspace layout. Invalid mounts, ports, or profile keys fail before container creation. |
-| **v0.5: connected labs** | Common network labs work without configuring the host by hand. | OpenVPN and WireGuard inside isolated containers, with only required capabilities/devices; explicit network modes; connection status and logs; opt-in browser desktop for GUI tools. Implement Linux first, then validate Docker Desktop and macOS behavior. | VPN traffic and DNS behavior are tested in a controlled lab; disconnect/restart works; unsupported host features produce an actionable error. Desktop binds to localhost by default. |
+| **v0.5: network and desktop maturity** | Connected labs work predictably across supported hosts. | WireGuard, connection-aware VPN status, DNS and route tests, explicit network modes, authenticated desktop sessions, persistent GUI settings, and platform-specific diagnostics. | VPN traffic and DNS behavior pass controlled tests on each supported host; unsupported host features produce an actionable error. |
 | **v1.0: dependable free workstation** | Stable local product for regular security work. | Supported-platform matrix, upgrade/migration guide, maintained release cadence, accessibility of CLI output, troubleshooting docs, and realistic example labs. | Release gates below pass for two consecutive releases, with no known workspace data-loss bug or critical image vulnerability left unaddressed. |
 
 These are roughly a few months of focused work for a small team, and longer for a
-part-time solo maintainer. v0.2 and the image pipeline are the next two investments.
+part-time solo maintainer. Image hardening and repeatable lab configuration are the next investments.
 
 ## Performance and reliability gates
 

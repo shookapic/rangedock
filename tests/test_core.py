@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from rangedock.core import LABEL, IMAGE, WORKSPACE_LABEL, RangeDockError, Workbench, valid_name
+from rangedock.core import (IMAGE, IMAGES, LABEL, PROFILE_LABEL, REMOTE_IMAGES,
+                            VPN_LABEL, WORKSPACE_LABEL, RangeDockError, Workbench, valid_name)
 
 
 class FakeDocker:
@@ -13,6 +14,9 @@ class FakeDocker:
         self.running = False
         self.managed = True
         self.workspace = ""
+        self.profile = "web"
+        self.vpn = None
+        self.image = IMAGE
         self.platform = "linux"
 
     def call(self, args, *, input_text=None, interactive=False):
@@ -29,17 +33,24 @@ class FakeDocker:
                 value.removeprefix(f"{WORKSPACE_LABEL}=") for value in args
                 if value.startswith(f"{WORKSPACE_LABEL}=")
             )
+            self.profile = next(value.removeprefix(f"{PROFILE_LABEL}=") for value in args
+                                if value.startswith(f"{PROFILE_LABEL}="))
+            self.vpn = next((value.removeprefix(f"{VPN_LABEL}=") for value in args
+                             if value.startswith(f"{VPN_LABEL}=")), None)
+            self.image = args[-1]
             return "container-id"
         if args[:2] == ["container", "inspect"]:
             if not self.exists:
                 raise RangeDockError("No such container")
             return json.dumps({
                 "Config": {
-                    "Labels": {LABEL: "true" if self.managed else "false", WORKSPACE_LABEL: self.workspace},
-                    "Image": IMAGE,
+                    "Labels": {LABEL: "true" if self.managed else "false", WORKSPACE_LABEL: self.workspace,
+                               PROFILE_LABEL: self.profile, **({VPN_LABEL: self.vpn} if self.vpn else {})},
+                    "Image": self.image,
                 },
                 "State": {"Running": self.running, "Status": "running" if self.running else "exited"},
                 "Created": "2026-09-25T00:00:00Z",
+                "NetworkSettings": {"Ports": {"6080/tcp": [{"HostPort": "49152"}]}},
             })
         if args[:2] == ["container", "ls"]:
             if "--format" in args and args[-1] == "{{.Names}}":
@@ -132,8 +143,37 @@ class WorkbenchTests(unittest.TestCase):
         fake = FakeDocker()
         Workbench(fake).build()
         build = next(call for call in fake.calls if call[0][0] == "build")
-        self.assertEqual(build[0], ["build", "--pull", "-t", IMAGE, "-"])
-        self.assertIn("FROM kalilinux/kali-rolling", build[1])
+        self.assertEqual(build[0][:6], ["build", "--pull", "--target", "web", "-t", IMAGE])
+        self.assertTrue(build[0][-1].endswith("rangedock"))
+
+    def test_pull_tags_published_image_locally(self):
+        fake = FakeDocker()
+        Workbench(fake).pull("base")
+        self.assertIn((["pull", REMOTE_IMAGES["base"]], None, True), fake.calls)
+        self.assertIn((["tag", REMOTE_IMAGES["base"], IMAGES["base"]], None, False), fake.calls)
+
+    def test_desktop_uses_loopback_port(self):
+        fake = FakeDocker()
+        bench = Workbench(fake)
+        with tempfile.TemporaryDirectory() as folder:
+            bench.create("lab", Path(folder), profile="desktop")
+        create = next(args for args, _, _ in fake.calls if args[:2] == ["container", "create"])
+        self.assertIn("127.0.0.1::6080", create)
+        self.assertEqual(bench.desktop_url("lab"), "http://127.0.0.1:49152/vnc.html?autoconnect=1")
+
+    def test_vpn_mount_is_read_only_and_capability_is_scoped(self):
+        fake = FakeDocker()
+        bench = Workbench(fake)
+        with tempfile.TemporaryDirectory() as folder:
+            config = Path(folder) / "client.ovpn"
+            config.write_text("client\n", encoding="utf-8")
+            bench.create("lab", Path(folder) / "workspace", vpn=config)
+            create = next(args for args, _, _ in fake.calls if args[:2] == ["container", "create"])
+            self.assertIn(f"type=bind,source={config.parent.resolve()},target=/vpn,readonly", create)
+            self.assertIn("NET_ADMIN", create)
+            self.assertIn("/dev/net/tun:/dev/net/tun", create)
+            self.assertNotIn("--privileged", create)
+            self.assertEqual(bench.info("lab")["vpn"], str(config.resolve()))
 
 
 if __name__ == "__main__":
