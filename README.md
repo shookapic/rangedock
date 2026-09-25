@@ -74,6 +74,17 @@ This release manages local, named workspaces and one bundled image. It does not 
 
 The Docker daemon has broad access to its host. RangeDock checks its management label before stopping or removing a container, but that label is an ownership guard, not a security boundary. Inspect the Dockerfile before building and mount only folders you intend to share.
 
+## macOS smoke check
+
+The macOS CI job checks the Python CLI; a Docker lifecycle check on a Mac is still manual. After `rangedock build`, run `rangedock open mac-smoke`, then inside the shell:
+
+```bash
+echo working > /workspace/proof.txt
+exit
+```
+
+On the host, run `cat ~/rangedock-workspaces/mac-smoke/proof.txt`. It should print `working`. Then run `rangedock stop mac-smoke` and `rangedock remove mac-smoke`. The host folder and file stay in place.
+
 ## Development
 
 ```bash
