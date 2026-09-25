@@ -178,4 +178,6 @@ python -m unittest discover -s tests -v
 docker build --target web -t rangedock:test src/rangedock
 ```
 
+`uv.lock` pins the exact dependency versions. For a reproducible environment use `uv sync --frozen`; after changing dependencies in `pyproject.toml`, run `uv lock` and commit the updated lock file.
+
 The RangeDock CLI is MIT licensed. The Kali base, installed tools, and wordlists retain their own licenses. Issues and contributions welcome.
