@@ -7,7 +7,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
+from dataclasses import dataclass
 from importlib import resources
 from pathlib import Path
 
@@ -42,6 +44,65 @@ class RangeDockError(Exception):
     """An actionable CLI error."""
 
 
+@dataclass(frozen=True)
+class CommandResult:
+    exit_code: int
+    stdout: str
+    stderr: str
+    seconds: float
+    timed_out: bool
+    output_truncated: bool
+
+
+def run_bounded(command: list[str], *, timeout: float, max_output_bytes: int) -> CommandResult:
+    """Capture a process without letting its output or runtime grow without bound."""
+    started = time.monotonic()
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    remaining = max_output_bytes
+    truncated = False
+    lock = threading.Lock()
+    stdout_parts: list[bytes] = []
+    stderr_parts: list[bytes] = []
+
+    def drain(stream, parts: list[bytes]) -> None:
+        nonlocal remaining, truncated
+        try:
+            while chunk := stream.read(8192):
+                with lock:
+                    kept = chunk[:remaining]
+                    if kept:
+                        parts.append(kept)
+                        remaining -= len(kept)
+                    if len(kept) != len(chunk):
+                        truncated = True
+        finally:
+            stream.close()
+
+    readers = [
+        threading.Thread(target=drain, args=(process.stdout, stdout_parts), daemon=True),
+        threading.Thread(target=drain, args=(process.stderr, stderr_parts), daemon=True),
+    ]
+    for reader in readers:
+        reader.start()
+    timed_out = False
+    try:
+        exit_code = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        exit_code = process.wait()
+    for reader in readers:
+        reader.join()
+    return CommandResult(
+        exit_code=exit_code,
+        stdout=b"".join(stdout_parts).decode("utf-8", errors="replace"),
+        stderr=b"".join(stderr_parts).decode("utf-8", errors="replace"),
+        seconds=round(time.monotonic() - started, 3),
+        timed_out=timed_out or exit_code == 124,
+        output_truncated=truncated,
+    )
+
+
 class Docker:
     def call(self, args: list[str], *, input_text: str | None = None,
              interactive: bool = False) -> str:
@@ -63,6 +124,12 @@ class Docker:
         """Run an interactive Docker command and return its exit code instead of raising."""
         try:
             return subprocess.run(["docker", *args], check=False).returncode
+        except FileNotFoundError as exc:
+            raise RangeDockError("Docker CLI not found. Install Docker Desktop or Docker Engine.") from exc
+
+    def result(self, args: list[str], *, timeout: float, max_output_bytes: int) -> CommandResult:
+        try:
+            return run_bounded(["docker", *args], timeout=timeout, max_output_bytes=max_output_bytes)
         except FileNotFoundError as exc:
             raise RangeDockError("Docker CLI not found. Install Docker Desktop or Docker Engine.") from exc
 
@@ -448,12 +515,31 @@ class Workbench:
             self.start(name)
         return self.docker.status(["container", "exec", tty_flags(), "--workdir", workdir, container, *command])
 
-    def capture(self, name: str, command: list[str], *, workdir: str = "/workspace") -> str:
-        """Run a non-interactive command in a running workspace and return its output."""
+    def capture(self, name: str, command: list[str], *, workdir: str = "/workspace",
+                start: bool = True) -> str:
+        """Run a non-interactive command and return its output."""
         container, details = self._managed(name)
         if not details.get("State", {}).get("Running"):
+            if not start:
+                raise RangeDockError(f"Workspace '{name}' is stopped. Start it before reading its tools.")
             self.start(name)
         return self.docker.call(["container", "exec", "--workdir", workdir, container, *command])
+
+    def execute_result(self, name: str, command: list[str], *, timeout_seconds: int = 30) -> CommandResult:
+        """Run one command in an already running workspace for non-interactive clients."""
+        if not command or len(command) > 32 or any(
+            not isinstance(word, str) or not word or len(word) > 4096 for word in command
+        ) or sum(map(len, command)) > 8192:
+            raise RangeDockError("Command must contain 1–32 nonempty arguments (at most 8192 characters total).")
+        if not isinstance(timeout_seconds, int) or not 1 <= timeout_seconds <= 120:
+            raise RangeDockError("Timeout must be between 1 and 120 seconds.")
+        container, details = self._managed(name)
+        if not details.get("State", {}).get("Running"):
+            raise RangeDockError(f"Workspace '{name}' is stopped. Start it before running a command.")
+        return self.docker.result([
+            "container", "exec", "--workdir", "/workspace", container,
+            "timeout", "--signal=TERM", "--kill-after=2s", f"{timeout_seconds}s", *command,
+        ], timeout=timeout_seconds + 5, max_output_bytes=65536)
 
     def list(self) -> list[dict]:
         self.daemon()
