@@ -27,7 +27,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - run: uv sync --frozen --extra mcp --python ${{ matrix.python-version }}
-      - run: uv run --no-sync python -m unittest discover -s tests -p test_mcp.py -v
+      - run: uv run --no-sync --no-build python -m unittest discover -s tests -p test_mcp.py -v
       - run: rangedock --help
       - run: rangedock tour
       - run: rangedock vpn profile list
