@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rangedock"
-version = "0.4.1"
+version = "0.4.2"
 description = "CLI-managed Docker workspaces for security labs"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,8 +22,12 @@ classifiers = [
   "Topic :: System :: Systems Administration",
 ]
 
+[project.optional-dependencies]
+mcp = ["mcp>=2,<3"]
+
 [project.scripts]
 rangedock = "rangedock.cli:main"
+rangedock-mcp = "rangedock.mcp_server:main"
 
 [project.urls]
 Repository = "https://github.com/shookapic/rangedock"

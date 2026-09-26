@@ -70,18 +70,21 @@ def bundled_tools() -> tuple[Tool, ...]:
     return parse_tools(text, "the RangeDock package")
 
 
-def workspace_tools(bench: Workbench, name: str) -> ToolCatalog:
+def workspace_tools(bench: Workbench, name: str, *, start: bool = True) -> ToolCatalog:
     """Load the tool manifest pinned in a workspace image.
 
     Images built before the manifest existed fall back to the bundled catalog,
     filtered to the commands the workspace actually has.
     """
     try:
-        text = bench.capture(name, ["cat", MANIFEST_PATH])
+        text = bench.capture(name, ["cat", MANIFEST_PATH], start=start)
     except RangeDockError:
+        if not start and bench.info(name)["status"] != "running":
+            raise
         catalog = bundled_tools()
         commands = [command for tool in catalog for command in (tool.name, *tool.aliases)]
-        installed = set(bench.capture(name, ["sh", "-c", INSTALLED_SCRIPT, "sh", *commands]).splitlines())
+        installed = set(bench.capture(name, ["sh", "-c", INSTALLED_SCRIPT, "sh", *commands],
+                                      start=start).splitlines())
         tools = tuple(
             replace(tool, aliases=tuple(alias for alias in tool.aliases if alias in installed))
             for tool in catalog if tool.name in installed

@@ -44,6 +44,34 @@ rangedock open lab
 
 You can use `uv tool install git+https://github.com/shookapic/rangedock.git` or `python -m pip install git+https://github.com/shookapic/rangedock.git` instead of pipx. On first use, RangeDock pulls the versioned `web` image from GitHub Container Registry. Later container operations use the local image. You can pull another image with `rangedock image pull base` or build from the [bundled Dockerfile](src/rangedock/Dockerfile) with `rangedock build base`, `rangedock build web`, or `rangedock build desktop`.
 
+### Connect an AI agent through MCP
+
+RangeDock has an optional local [MCP server](MCP_SPEC.md). It lets an MCP client discover your existing workspaces, saved VPN profile names, and installed lab tools. In its default mode it cannot start or stop a workspace or run a command. It does not create workspaces or manage images.
+
+From a source checkout, install and check the server:
+
+```bash
+python -m pip install -e ".[mcp]"
+rangedock-mcp --help
+```
+
+For a pipx installation, run `pipx inject rangedock 'mcp>=2,<3'`. For a new uv installation, run `uv tool install --with mcp git+https://github.com/shookapic/rangedock.git`. Find the installed executable with `where.exe rangedock-mcp` on Windows or `command -v rangedock-mcp` on macOS/Linux.
+
+Add it to your MCP client's local server configuration. Use the executable's absolute path as `command` if the client does not inherit your terminal's `PATH`:
+
+```json
+{
+  "mcpServers": {
+    "rangedock": {
+      "command": "rangedock-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+Restart the MCP client and ask it to list RangeDock workspaces or describe a tool in a running workspace. To let the agent work in **one existing** workspace, change the arguments to `["--workspace", "lab", "--allow-exec"]`. This grant adds start, stop, and command execution tools for `lab`. Commands can change files in its mounted host folder and reach the network from the container. Each command has a 1–120 second timeout and a 64 KiB output cap. A stopped workspace must be started explicitly before a command or tool catalog read. Keep the discovery-only configuration when you only need information.
+
 If you do not have pipx or uv, see their [pipx installation](https://pipx.pypa.io/latest/how-to/install-pipx.html) or [uv installation](https://docs.astral.sh/uv/getting-started/installation/) instructions. If `rangedock` is not found after installation, open a new terminal and check that your tool install directory is on `PATH`.
 
 Upgrading from an earlier version: existing containers remain usable on their original image. New workspaces use v0.4 images, which add the tool manifest that powers console completion. To move an existing workspace to the new image, note its folder with `rangedock info NAME`, then run `rangedock stop NAME`, `rangedock remove NAME`, and `rangedock open NAME --workspace PATH`. Files in the mounted host folder remain; changes stored only inside the old container do not. `rangedock image update web` refreshes the local image tag but never changes existing containers.
@@ -51,7 +79,7 @@ Upgrading from an earlier version: existing containers remain usable on their or
 ## First workspace
 
 Run `rangedock tour` for a read-only command walkthrough. Run `rangedock tour --run` to try it with a small `base` workspace. The hands-on tour creates `~/rangedock-workspaces/tour/rangedock-tour.txt`, demonstrates that the file survives a container restart, and leaves the practice container stopped. `rangedock remove tour` removes that container while keeping the host files. Use `--name` or `--workspace` to choose another practice location. The base image may download on first use.
-The v0.4.1 CLI uses the v0.4.0 images, which carry the tool manifest for console completion.
+The v0.4.2 CLI uses the v0.4.0 images, which carry the tool manifest for console completion.
 
 ```bash
 rangedock open lab
