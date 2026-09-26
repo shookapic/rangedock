@@ -17,12 +17,11 @@ rangedock-mcp --workspace ctf-lab     # discovery limited to one workspace
 rangedock-mcp --workspace ctf-lab --allow-exec
 ```
 
-Install the optional dependency from a checkout with `python -m pip install -e
-'.[mcp]'`. For an existing pipx install, use `pipx inject rangedock 'mcp>=2,<3'`;
-for a new uv tool install, use `uv tool install --with mcp
-git+https://github.com/shookapic/rangedock.git`. The normal RangeDock install
-does not need the MCP SDK. The server writes protocol messages to stdout and
-diagnostics to stderr.
+Install the optional dependency from a checkout with `python -m pip install -e ".[mcp]"`.
+For an existing pipx install, use `pipx inject rangedock 'mcp>=2,<3'`.
+For a new uv tool install, use `uv tool install --with mcp git+https://github.com/shookapic/rangedock.git`.
+The normal RangeDock install does not need the MCP SDK. The server writes
+protocol messages to stdout and diagnostics to stderr.
 
 ## Tools
 
@@ -75,5 +74,5 @@ chooses the workspace and enables execution when configuring the MCP client.
 4. A command returns separate stdout/stderr, exit code, and a bounded result;
    timeout and oversized output are observable.
 5. A scoped server refuses another workspace name and does not expose its data.
-6. A real Docker smoke test runs a harmless command in an existing RangeDock
-   workspace through the MCP tool and confirms no host process is launched by it.
+6. A real Docker smoke test runs a harmless command through the MCP tool in
+   an existing RangeDock workspace and verifies its output and exit code.
