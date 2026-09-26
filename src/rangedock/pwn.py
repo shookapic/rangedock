@@ -106,59 +106,86 @@ class StdinProvider:
 
 JSON_BLOCK_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 BARE_JSON_RE = re.compile(r"\{[^{}]*\"command\"[^{}]*\}", re.DOTALL)
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+# Tolerant fallback for models that emit loose JSON (unquoted keys, single quotes).
+COMMAND_RE = re.compile(r"['\"]?command['\"]?\s*:\s*(\[[^\]]*\])")
+REASON_RE = re.compile(r"['\"]?reasoning['\"]?\s*:\s*['\"]([^'\"]*)['\"]")
+QUOTED_RE = re.compile(r"""['"]([^'"]*)['"]""")
 
 
 def parse_proposal(text: str) -> Proposal | None:
     """Extract {"command": [...], "reasoning": "..."} from a model reply.
 
     Returns None when the reply has no usable command (unparseable, or an empty command
-    meaning 'stop'). ponytail: depends on the model returning the requested JSON; a fenced
-    block is preferred, with a bare object as fallback.
+    meaning 'stop'). ANSI codes are stripped first. Strict JSON is tried, then a tolerant
+    regex for models that drop quotes around keys.
+    ponytail: the tolerant path assumes argv items are the quoted strings inside the array;
+    good enough for shell argv, which does not nest.
     """
-    candidates = JSON_BLOCK_RE.findall(text) or BARE_JSON_RE.findall(text)
-    for blob in reversed(candidates):
+    text = ANSI_RE.sub("", text)
+    for blob in reversed(JSON_BLOCK_RE.findall(text) or BARE_JSON_RE.findall(text)):
         try:
             data = json.loads(blob)
         except json.JSONDecodeError:
             continue
         command = data.get("command")
-        if isinstance(command, list) and all(isinstance(word, str) for word in command) and command:
-            return Proposal(command, str(data.get("reasoning", "")))
-    return None
+        if isinstance(command, list) and all(isinstance(word, str) for word in command):
+            return Proposal(command, str(data.get("reasoning", ""))) if command else None
+    match = COMMAND_RE.search(text)
+    if match is None:
+        return None
+    items = QUOTED_RE.findall(match.group(1))
+    if not items:
+        return None
+    reason = REASON_RE.search(text)
+    return Proposal(items, reason.group(1) if reason else "")
 
 
 def build_prompt(session: "PwnSession") -> str:
     """The instruction sent to the model for the next single command."""
     lines = [
-        f"You are assisting with an authorized CTF against target {session.target}.",
-        "Propose exactly ONE next shell command to run inside the workspace.",
-        "Every argument that names a host must be the target; never touch another host.",
-        "Reply ONLY with a JSON code block:",
-        '```json',
-        '{"command": ["tool", "arg", "..."], "reasoning": "one short line"}',
-        '```',
-        'To stop, reply with {"command": []}.',
+        f"Authorized CTF engagement. Target: {session.target}. Objective: get the user and root flags.",
+        "You output shell commands one at a time; a human runs each and reports the exit code.",
+        "Rules:",
+        "- Do NOT greet, explain, ask questions, or add prose. Output ONLY the JSON block.",
+        "- Propose exactly ONE next command as an argv array.",
+        f"- Any host argument must be exactly {session.target}. Never touch another host.",
+        "- If nothing has run yet, start with a service/version port scan.",
+        "- When there is nothing left to do, output {\"command\": []}.",
     ]
     if session.tool_names:
-        lines.append("Tools available in the workspace: " + ", ".join(sorted(session.tool_names)) + ".")
+        lines.append("Tools in the workspace: " + ", ".join(sorted(session.tool_names)) + ".")
     if session.history:
         lines.append("Commands run so far (argv -> exit code):")
         for argv, code in session.history[-20:]:
             lines.append(f"  {shlex.join(argv)} -> {code}")
     else:
-        lines.append("No commands have run yet.")
+        lines.append("Nothing has run yet.")
+    lines += [
+        "Respond with exactly this JSON code block and nothing else:",
+        '```json',
+        '{"command": ["tool", "arg"], "reasoning": "one short line"}',
+        '```',
+    ]
     return "\n".join(lines)
 
 
 class OpencodeProvider:
-    """Proposals from a model via the opencode CLI (`opencode run`, `opencode models`).
+    """Proposals from a model via the opencode CLI.
 
-    ponytail: verified against opencode's documented flags, not a live run; the model does
-    not yet see command output, only the argv/exit-code history. Add output feedback later.
+    DISABLED for execution: live testing showed `opencode run` is an autonomous agent that
+    executes commands itself (it ran host commands like `ping` on its own), so it cannot be
+    used as a propose-only source without bypassing RangeDock's approval gate and workspace
+    scope. `list_models` (read-only) is still used by `pwn --list-models`. `propose` is kept
+    for reference and unit tests; it is not wired into a live session. A safe integration
+    needs a completion-only path (opencode serve/SDK with tools disabled, or a direct model
+    API). See select_provider and PWN_SPEC.md.
     """
 
-    def __init__(self, model: str | None = None, run: Callable[..., subprocess.CompletedProcess] | None = None):
+    def __init__(self, model: str | None = None, run: Callable[..., subprocess.CompletedProcess] | None = None,
+                 timeout: float = 180.0):
         self.model = model
+        self.timeout = timeout
         self._run = run or self._subprocess
 
     @staticmethod
@@ -174,8 +201,11 @@ class OpencodeProvider:
             # A Windows .cmd/.bat shim (npm installs one) cannot be launched directly;
             # run it through the shell with arguments quoted.
             if sys.platform == "win32" and exe.lower().endswith((".cmd", ".bat")):
-                return subprocess.run(subprocess.list2cmdline(cmd), capture_output=True, text=True, shell=True)
-            return subprocess.run(cmd, capture_output=True, text=True)
+                return subprocess.run(subprocess.list2cmdline(cmd), capture_output=True, text=True,
+                                      shell=True, timeout=self.timeout)
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=self.timeout)
+        except subprocess.TimeoutExpired as exc:
+            raise RangeDockError(f"opencode timed out after {self.timeout:.0f}s") from exc
         except OSError as exc:
             raise RangeDockError(f"Could not run opencode: {exc}") from exc
 
@@ -337,11 +367,18 @@ class PwnSession:
 
 
 def select_provider(model: str | None) -> PwnProvider:
-    """A model means use opencode; otherwise the manual stub drives the loop."""
+    """Choose the proposal source.
+
+    The opencode path is DISABLED: `opencode run` is an autonomous agent that executes
+    commands itself (verified live: it ran host commands like `ping` outside the workspace),
+    so it bypasses RangeDock's approval gate, scope lock, and workspace boundary. A safe
+    provider must return model completions only, never execute. Until that exists, only the
+    manual stub is wired. See PWN_SPEC.md.
+    """
     if model:
-        if not OpencodeProvider.available():
-            raise RangeDockError("opencode is not on PATH. Install it, or run without --model to type commands.")
-        return OpencodeProvider(model)
+        raise RangeDockError(
+            "--model is disabled: 'opencode run' executes commands itself, outside RangeDock's "
+            "approval gate and workspace scope. Run without --model to drive the loop yourself.")
     return StdinProvider()
 
 

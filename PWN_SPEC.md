@@ -1,10 +1,12 @@
 # RangeDock AI-Assisted CTF Mode (`pwn`)
 
-Status: phases 1-3 implemented (gate, loop, transcript, budget, tier + scope enforcement,
-opencode provider + model selection). Provider path is verified against opencode's
-documented flags and mocked in tests, but NOT yet run against a live opencode + model, and
-the model does not yet see command output — treat as experimental until a live session is
-validated.
+Status: phases 1-2 implemented and usable (gate, loop, transcript, budget, tier + scope
+enforcement, manual stub provider). Phase 3 (opencode provider) is BLOCKED and disabled:
+live testing showed `opencode run` is an autonomous agent that executes commands itself,
+on the host, outside our approval gate and workspace scope — so it cannot be used as a
+propose-only source. `pwn --list-models` still works (read-only). A safe model integration
+needs a completion-only path (opencode serve/SDK with tools disabled, or a direct model API)
+and is not built. `--model` is disabled until then.
 Target: v0.6.x (after WireGuard and desktop maturity in v0.5)
 Owner: RangeDock maintainers
 
